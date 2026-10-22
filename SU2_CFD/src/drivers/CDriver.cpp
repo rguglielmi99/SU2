@@ -117,6 +117,11 @@ CDriverBase(confFile, val_nZone, MPICommunicator), StopCalc(false), fsi(false), 
 
   PreprocessInput(config_container, driver_config);
 
+  for (unsigned short zone = 0; zone < nZone; ++zone)
+    if (config_container[zone]->GetKind_Solver() == MAIN_SOLVER::PRIMITIVE_EULER)
+      SU2_MPI::Error("PRIMITIVE_EULER phase 3: storage/factory available; residual, boundary conditions, "
+                     "output and time integration are not implemented yet. Simulation is disabled.", CURRENT_FUNCTION);
+
   /*--- Retrieve dimension from mesh file ---*/
 
   nDim = CConfig::GetnDim(config_container[ZONE_0]->GetMesh_FileName(),

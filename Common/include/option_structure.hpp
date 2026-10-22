@@ -263,10 +263,12 @@ enum class MAIN_SOLVER {
   MULTIPHYSICS,
   NEMO_EULER,                  /*!< \brief Definition of the NEMO Euler solver. */
   NEMO_NAVIER_STOKES,          /*!< \brief Definition of the NEMO NS solver. */
+  PRIMITIVE_EULER,             /*!< \brief Path-conservative Euler in (rho,u,v,p). */
 };
 static const MapType<std::string, MAIN_SOLVER> Solver_Map = {
   MakePair("NONE", MAIN_SOLVER::NONE)
   MakePair("EULER", MAIN_SOLVER::EULER)
+  MakePair("PRIMITIVE_EULER", MAIN_SOLVER::PRIMITIVE_EULER)
   MakePair("NAVIER_STOKES", MAIN_SOLVER::NAVIER_STOKES)
   MakePair("RANS", MAIN_SOLVER::RANS)
   MakePair("INC_EULER", MAIN_SOLVER::INC_EULER)

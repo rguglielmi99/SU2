@@ -28,6 +28,7 @@
 #include "../../include/solvers/CSolver.hpp"
 #include "../../include/solvers/CSolverFactory.hpp"
 #include "../../include/solvers/CEulerSolver.hpp"
+#include "../../include/solvers/CPrimitiveEulerSolver.hpp"
 #include "../../include/solvers/CIncEulerSolver.hpp"
 #include "../../include/solvers/CNSSolver.hpp"
 #include "../../include/solvers/CIncNSSolver.hpp"
@@ -63,6 +64,14 @@ CSolver** CSolverFactory::CreateSolverContainer(MAIN_SOLVER kindMainSolver, CCon
   solver = new CSolver*[MAX_SOLS]();
 
   switch (kindMainSolver) {
+    case MAIN_SOLVER::PRIMITIVE_EULER:
+      try {
+        solver[FLOW_SOL] = CreateSubSolver(SUB_SOLVER_TYPE::PRIMITIVE_EULER, solver, geometry, config, iMGLevel);
+      } catch (...) {
+        delete[] solver;
+        throw;
+      }
+      break;
     case MAIN_SOLVER::TEMPLATE_SOLVER:
       solver[FLOW_SOL] = CreateSubSolver(SUB_SOLVER_TYPE::TEMPLATE, solver, geometry, config, iMGLevel);
       break;
@@ -219,6 +228,9 @@ CSolver** CSolverFactory::CreateSolverContainer(MAIN_SOLVER kindMainSolver, CCon
 CSolver* CSolverFactory::CreateSubSolver(SUB_SOLVER_TYPE kindSolver, CSolver **solver, CGeometry *geometry, CConfig *config, int iMGLevel){
 
   CSolver *genericSolver = nullptr;
+  // Keep the primitive solver owned until metadata registration succeeds too:
+  // std::map insertion below may throw after its constructor has completed.
+  std::unique_ptr<CSolver> primitiveOwner;
 
   TURB_MODEL kindTurbModel = config->GetKind_Turb_Model();
   TURB_TRANS_MODEL kindTransModel = config->GetKind_Trans_Model();
@@ -319,6 +331,12 @@ CSolver* CSolverFactory::CreateSubSolver(SUB_SOLVER_TYPE kindSolver, CSolver **s
       genericSolver = new CTemplateSolver(geometry, config);
       metaData.integrationType = INTEGRATION_TYPE::SINGLEGRID;
       break;
+    case SUB_SOLVER_TYPE::PRIMITIVE_EULER:
+      primitiveOwner.reset(new CPrimitiveEulerSolver(geometry, config, iMGLevel));
+      genericSolver = primitiveOwner.get();
+      // Phase 3 registers storage and geometry only. No runnable integration yet.
+      metaData.integrationType = INTEGRATION_TYPE::NONE;
+      break;
     case SUB_SOLVER_TYPE::RADIATION:
       if (config->AddRadiation()){
         genericSolver = new CRadP1Solver(geometry, config);
@@ -339,6 +357,7 @@ CSolver* CSolverFactory::CreateSubSolver(SUB_SOLVER_TYPE kindSolver, CSolver **s
   if (genericSolver != nullptr)
     allocatedSolvers[genericSolver] = metaData;
 
+  primitiveOwner.release();
   return genericSolver;
 
 }

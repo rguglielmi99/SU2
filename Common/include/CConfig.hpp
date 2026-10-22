@@ -508,6 +508,10 @@ private:
   DIFFUSIVITYMODEL Kind_Diffusivity_Model; /*!< \brief Kind of the mass diffusivity Model */
   FREESTREAM_OPTION Kind_FreeStreamOption; /*!< \brief Kind of free stream option to choose if initializing with density or temperature  */
   MAIN_SOLVER Kind_Solver;         /*!< \brief Kind of solver: Euler, NS, Continuous adjoint, etc.  */
+  std::string PrimitiveRepresentation = "NODE";
+  std::string PrimitiveFaceQuadrature = "AGGREGATED";
+  std::string PrimitiveVolumeQuadrature = "MEAN_COEFF";
+  std::array<su2double, 4> PrimitiveInitialState{{1.0, 0.5, 0.3, 1.0}};
   LIMITER Kind_SlopeLimit,      /*!< \brief Slope limiter (for the runtime eq. system). */
   Kind_SlopeLimit_Flow,         /*!< \brief Slope limiter for flow equations.*/
   Kind_SlopeLimit_Turb,         /*!< \brief Slope limiter for the turbulence equation.*/
@@ -3911,12 +3915,17 @@ public:
    * \return Governing equation that we are solving.
    */
   MAIN_SOLVER GetKind_Solver(void) const { return Kind_Solver; }
+  const std::string& GetPrimitiveRepresentation() const { return PrimitiveRepresentation; }
+  const std::string& GetPrimitiveFaceQuadrature() const { return PrimitiveFaceQuadrature; }
+  const std::string& GetPrimitiveVolumeQuadrature() const { return PrimitiveVolumeQuadrature; }
+  const std::array<su2double, 4>& GetPrimitiveInitialState() const { return PrimitiveInitialState; }
 
   /*!
    * \brief Return true if a fluid solver is in use.
    */
   bool GetFluidProblem(void) const {
     switch (Kind_Solver) {
+      case MAIN_SOLVER::PRIMITIVE_EULER:
       case MAIN_SOLVER::EULER : case MAIN_SOLVER::NAVIER_STOKES: case MAIN_SOLVER::RANS:
       case MAIN_SOLVER::INC_EULER : case MAIN_SOLVER::INC_NAVIER_STOKES: case MAIN_SOLVER::INC_RANS:
       case MAIN_SOLVER::NEMO_EULER : case MAIN_SOLVER::NEMO_NAVIER_STOKES:

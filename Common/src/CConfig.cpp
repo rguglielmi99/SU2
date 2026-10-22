@@ -1113,6 +1113,10 @@ void CConfig::SetConfig_Options() {
 
   /*!\brief SOLVER \n DESCRIPTION: Type of solver \n Options: see \link Solver_Map \endlink \n DEFAULT: NONE \ingroup Config*/
   addEnumOption("SOLVER", Kind_Solver, Solver_Map, MAIN_SOLVER::NONE);
+  addStringOption("PRIMITIVE_REPRESENTATION", PrimitiveRepresentation, "NODE");
+  addStringOption("PRIMITIVE_FACE_QUADRATURE", PrimitiveFaceQuadrature, "AGGREGATED");
+  addStringOption("PRIMITIVE_VOLUME_QUADRATURE", PrimitiveVolumeQuadrature, "MEAN_COEFF");
+  addDoubleArrayOption("PRIMITIVE_INITIAL_STATE", 4, false, PrimitiveInitialState.data());
   /*!\brief MULTIZONE \n DESCRIPTION: Enable multizone mode \ingroup Config*/
   addBoolOption("MULTIZONE", Multizone_Problem, NO);
   /*!\brief PHYSICAL_PROBLEM \n DESCRIPTION: Physical governing equations \n Options: see \link Solver_Map \endlink \n DEFAULT: NONE \ingroup Config*/
@@ -3650,6 +3654,7 @@ void CConfig::SetPostprocessing(SU2_COMPONENT val_software, unsigned short val_i
   }
   switch (Kind_Solver) {
     case MAIN_SOLVER::EULER:
+    case MAIN_SOLVER::PRIMITIVE_EULER:
     case MAIN_SOLVER::INC_EULER:
     case MAIN_SOLVER::FEM_EULER:
     case MAIN_SOLVER::NEMO_EULER:
@@ -4020,7 +4025,7 @@ void CConfig::SetPostprocessing(SU2_COMPONENT val_software, unsigned short val_i
   if ((ContinuousAdjoint && !MG_AdjointFlow) ||
       (TimeMarching == TIME_MARCHING::TIME_STEPPING)) { nMGLevels = 0; }
 
-  if (Kind_Solver == MAIN_SOLVER::EULER ||
+  if (Kind_Solver == MAIN_SOLVER::PRIMITIVE_EULER || Kind_Solver == MAIN_SOLVER::EULER ||
       Kind_Solver == MAIN_SOLVER::NAVIER_STOKES ||
       Kind_Solver == MAIN_SOLVER::RANS ||
       Kind_Solver == MAIN_SOLVER::NEMO_EULER ||
@@ -6380,6 +6385,11 @@ void CConfig::SetOutput(SU2_COMPONENT val_software, unsigned short val_izone) {
      cout <<"based on the physical case: ";
     }
     switch (Kind_Solver) {
+      case MAIN_SOLVER::PRIMITIVE_EULER:
+        cout << "Primitive Euler 2D: phase 3 initialization only; numerical evolution unavailable." << endl;
+        cout << "Representation: " << PrimitiveRepresentation << ", faces: " << PrimitiveFaceQuadrature
+             << ", volume: " << PrimitiveVolumeQuadrature << "." << endl;
+        return;
       case MAIN_SOLVER::EULER:     case MAIN_SOLVER::DISC_ADJ_EULER:
       case MAIN_SOLVER::INC_EULER: case MAIN_SOLVER::DISC_ADJ_INC_EULER:
       case MAIN_SOLVER::FEM_EULER: case MAIN_SOLVER::DISC_ADJ_FEM_EULER:
@@ -8880,6 +8890,7 @@ void CConfig::SetGlobalParam(MAIN_SOLVER val_solver,
   };
 
   switch (val_solver) {
+    case MAIN_SOLVER::PRIMITIVE_EULER:
     case MAIN_SOLVER::EULER: case MAIN_SOLVER::INC_EULER: case MAIN_SOLVER::NEMO_EULER:
     case MAIN_SOLVER::DISC_ADJ_EULER: case MAIN_SOLVER::DISC_ADJ_INC_EULER:
       SetFlowParam();

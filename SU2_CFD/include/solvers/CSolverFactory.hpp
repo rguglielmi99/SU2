@@ -63,7 +63,8 @@ enum class SUB_SOLVER_TYPE {
   MESH,                    /*!< \brief Mesh solver */
   RADIATION,               /*!< \brief Radiation solver */
   DISC_ADJ_RADIATION,      /*!< \brief Discrete adjoint radiation solver */
-  NONE
+  NONE,
+  PRIMITIVE_EULER
 };
 
 enum class INTEGRATION_TYPE{
