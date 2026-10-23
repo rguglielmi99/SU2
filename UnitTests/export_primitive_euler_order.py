@@ -50,7 +50,9 @@ def main():
         ax.set_xticks(n, [str(x) for x in n])
         ax.grid(True, which="both", alpha=0.25)
         ax.legend(fontsize=8)
-    fig.savefig(args.output_dir / "primitive_euler_phase4_order.svg")
+    target = args.output_dir / "primitive_euler_phase4_order.svg"
+    fig.savefig(target)
+    target.write_text("\n".join(line.rstrip() for line in target.read_text().splitlines()) + "\n")
     plt.close(fig)
 
 

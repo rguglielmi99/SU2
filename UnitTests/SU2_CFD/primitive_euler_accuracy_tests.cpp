@@ -311,4 +311,3 @@ TEST_CASE("Aggregated face moments are compared with exact geometric segment int
     }
   }
 }
-

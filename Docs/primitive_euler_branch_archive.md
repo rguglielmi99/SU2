@@ -159,3 +159,8 @@ mentre il riferimento sperimentale resta fermo a d1732e90e3. Entrambi derivano
 dalla FASE 3 e il commit sperimentale non è antenato del principale.
 L'esperimento è integralmente recuperabile e il working tree finale è pulito.
 Nessuna FASE 5 e nessun push.
+
+Il commit di implementazione affine è `feb0b0e49d`. Un controllo staged ha
+evidenziato spazi finali emessi da Matplotlib nell’SVG e una riga vuota finale
+nel test; sono normalizzati in un commit locale successivo, senza cambiamenti
+alle formule o ai test. L’esportatore applica la stessa normalizzazione.
