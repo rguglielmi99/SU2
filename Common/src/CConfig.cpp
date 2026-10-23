@@ -6386,7 +6386,7 @@ void CConfig::SetOutput(SU2_COMPONENT val_software, unsigned short val_izone) {
     }
     switch (Kind_Solver) {
       case MAIN_SOLVER::PRIMITIVE_EULER:
-        cout << "Primitive Euler 2D: phase 3 initialization only; numerical evolution unavailable." << endl;
+        cout << "Primitive Euler 2D: phase 4 spatial operator; time advancement unavailable." << endl;
         cout << "Representation: " << PrimitiveRepresentation << ", faces: " << PrimitiveFaceQuadrature
              << ", volume: " << PrimitiveVolumeQuadrature << "." << endl;
         return;

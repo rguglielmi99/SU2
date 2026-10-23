@@ -119,8 +119,9 @@ CDriverBase(confFile, val_nZone, MPICommunicator), StopCalc(false), fsi(false), 
 
   for (unsigned short zone = 0; zone < nZone; ++zone)
     if (config_container[zone]->GetKind_Solver() == MAIN_SOLVER::PRIMITIVE_EULER)
-      SU2_MPI::Error("PRIMITIVE_EULER phase 3: storage/factory available; residual, boundary conditions, "
-                     "output and time integration are not implemented yet. Simulation is disabled.", CURRENT_FUNCTION);
+      SU2_MPI::Error("PRIMITIVE_EULER phase 4: spatial operator available through ComputeSpatialResidual; "
+                     "driver integration, output and time advancement are not implemented yet. Simulation is disabled.",
+                     CURRENT_FUNCTION);
 
   /*--- Retrieve dimension from mesh file ---*/
 

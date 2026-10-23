@@ -1,5 +1,10 @@
 # Euler 2D primitivo — FASE 3: classi, configurazione e factory
 
+Nota: questo rapporto descrive il checkpoint di fase 3. Il successivo
+[rapporto di fase 4](primitive_euler_phase4.md) aggiorna il contratto di
+`Upwind_Residual`, ora disponibile per il solo operatore spaziale, e i limiti
+sui bordi e sulla ricostruzione. L'avanzamento temporale resta disabilitato.
+
 Questa fase aggiunge lo stato primitivo e la classe solver dedicata, senza
 modificare `CEulerSolver` o `CEulerVariable`. Restano confermati AGGREGATED,
 NODE ed Eulero esplicito per la prima evoluzione numerica. Residuale, termine

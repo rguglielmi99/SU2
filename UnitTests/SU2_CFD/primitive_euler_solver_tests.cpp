@@ -136,7 +136,6 @@ TEST_CASE("Primitive scaffold cannot silently report a numerical simulation", "[
     for (unsigned k = 0; k < 4; ++k) solver.LinSysRes.GetBlock(i)[k] = 10 * i + k + 1;
   }
   const std::vector<std::function<void()>> calls{
-      [&]() { base->Upwind_Residual(nullptr, nullptr, nullptr, nullptr, 0); },
       [&]() { base->Centered_Residual(nullptr, nullptr, nullptr, nullptr, 0, 0); },
       [&]() { base->Source_Residual(nullptr, nullptr, nullptr, nullptr, 0); },
       [&]() { base->SetTime_Step(nullptr, nullptr, nullptr, 0, 0); },
@@ -150,8 +149,8 @@ TEST_CASE("Primitive scaffold cannot silently report a numerical simulation", "[
       calls[call]();
       FAIL("Evolution method returned without throwing");
     } catch (const std::logic_error& error) {
-      CHECK(std::string(error.what()) == "Primitive Euler phase 3: residual, boundary conditions and time integration "
-                                        "are not implemented");
+      CHECK(std::string(error.what()) == "Primitive Euler phase 4: use ComputeSpatialResidual; driver integration and time "
+                                        "advancement are not implemented");
     }
     for (unsigned long i = 0; i < points.size(); ++i) {
       CheckState(solver.GetPrimitiveNodes().GetPrimitiveState(i), before[i]);

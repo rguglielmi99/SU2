@@ -114,7 +114,7 @@ CIteration* CIterationFactory::CreateIteration(MAIN_SOLVER kindSolver, const CCo
       break;
 
     case MAIN_SOLVER::PRIMITIVE_EULER:
-      SU2_MPI::Error("Primitive Euler iteration is not implemented yet (phase 3 storage only).", CURRENT_FUNCTION);
+      SU2_MPI::Error("Primitive Euler iteration is not implemented yet (phase 4 spatial operator only).", CURRENT_FUNCTION);
       break;
     case MAIN_SOLVER::NONE: case MAIN_SOLVER::TEMPLATE_SOLVER: case MAIN_SOLVER::MULTIPHYSICS:
       SU2_MPI::Error("No iteration found for specified solver.", CURRENT_FUNCTION);

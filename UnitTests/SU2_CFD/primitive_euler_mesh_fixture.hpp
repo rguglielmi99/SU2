@@ -14,6 +14,10 @@
 namespace PrimitiveEulerTest {
 using PrimitiveEuler2D::Direction;
 using Triangle = std::array<unsigned long, 3>;
+struct BoundaryMarker {
+  std::string tag;
+  std::vector<std::array<unsigned long, 2>> edges;
+};
 struct QuietGeometryOutput {
   std::ostringstream sink;
   std::streambuf* previous = std::cout.rdbuf(sink.rdbuf());
@@ -27,7 +31,9 @@ struct MeshFixture {
   std::unique_ptr<CConfig> config;
   std::unique_ptr<CPhysicalGeometry> geometry;
   MeshFixture(const std::vector<Direction>& xy, const std::vector<Triangle>& triangles,
-              const std::string& solver = "EULER", const std::string& options = "") {
+              const std::string& solver = "EULER", const std::string& options = "",
+              const std::string& markerOption = "MARKER_CUSTOM",
+              std::vector<BoundaryMarker> markers = {}, bool reverseBoundary = false) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     for (unsigned attempt = 0;; ++attempt) {
       directory = std::filesystem::temp_directory_path() /
@@ -46,17 +52,23 @@ struct MeshFixture {
     for (const auto& t : triangles) mesh << "5 " << t[0] << " " << t[1] << " " << t[2] << "\n";
     mesh << "NPOIN= " << xy.size() << "\n";
     for (unsigned long i = 0; i < xy.size(); ++i) mesh << xy[i][0] << " " << xy[i][1] << " " << i << "\n";
-    unsigned boundaryCount = 0;
-    for (const auto& edge : edges) boundaryCount += edge.second.size() == 1;
-    mesh << "NMARK= 1\nMARKER_TAG= boundary\nMARKER_ELEMS= " << boundaryCount << "\n";
-    for (const auto& edge : edges)
-      if (edge.second.size() == 1)
-        mesh << "3 " << edge.second[0].first << " " << edge.second[0].second << "\n";
+    if (markers.empty()) {
+      markers.push_back({"boundary", {}});
+      for (const auto& edge : edges)
+        if (edge.second.size() == 1) markers[0].edges.push_back({{edge.second[0].first, edge.second[0].second}});
+    }
+    mesh << "NMARK= " << markers.size() << "\n";
+    for (const auto& marker : markers) {
+      mesh << "MARKER_TAG= " << marker.tag << "\nMARKER_ELEMS= " << marker.edges.size() << "\n";
+      for (const auto& edge : marker.edges)
+        mesh << "3 " << edge[reverseBoundary ? 1 : 0] << " " << edge[reverseBoundary ? 0 : 1] << "\n";
+    }
     mesh.close();
     QuietGeometryOutput quiet;
     std::stringstream text;
-    text << "SOLVER= " << solver << "\nMGLEVEL=0\nMARKER_CUSTOM=(boundary)\nMESH_FILENAME= "
-         << filename.string() << "\n" << options;
+    text << "SOLVER= " << solver << "\nMGLEVEL=0\n" << markerOption << "=(";
+    for (unsigned m = 0; m < markers.size(); ++m) text << (m ? "," : "") << markers[m].tag;
+    text << ")\nMESH_FILENAME= " << filename.string() << "\n" << options;
     config.reset(new CConfig(text, SU2_COMPONENT::SU2_CFD, false));
     {
       CPhysicalGeometry input(config.get(), 0, 1);
