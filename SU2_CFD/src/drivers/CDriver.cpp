@@ -119,8 +119,8 @@ CDriverBase(confFile, val_nZone, MPICommunicator), StopCalc(false), fsi(false), 
 
   for (unsigned short zone = 0; zone < nZone; ++zone)
     if (config_container[zone]->GetKind_Solver() == MAIN_SOLVER::PRIMITIVE_EULER)
-      SU2_MPI::Error("PRIMITIVE_EULER phase 4: spatial operator available through ComputeSpatialResidual; "
-                     "driver integration, output and time advancement are not implemented yet. Simulation is disabled.",
+      SU2_MPI::Error("PRIMITIVE_EULER phase 5: spatial operator and Forward Euler available through the solver API; "
+                     "general driver integration and output are not implemented yet. CLI simulation is disabled.",
                      CURRENT_FUNCTION);
 
   /*--- Retrieve dimension from mesh file ---*/

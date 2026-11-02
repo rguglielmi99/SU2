@@ -6,6 +6,30 @@
 #include "../../include/gradients/computeGradientsGreenGauss.hpp"
 #include "../../include/gradients/computeGradientsLeastSquares.hpp"
 #include "../../include/limiters/computeLimiters.hpp"
+#include <limits>
+
+namespace {
+struct PrimitiveEvaluationGuard {
+  std::atomic_flag& flag;
+  explicit PrimitiveEvaluationGuard(std::atomic_flag& value) : flag(value) {
+    if (omp_in_parallel()) throw std::logic_error("Primitive operator must be called outside OpenMP regions");
+    if (flag.test_and_set()) throw std::logic_error("Concurrent primitive evaluation on the same solver");
+  }
+  ~PrimitiveEvaluationGuard() { flag.clear(); }
+};
+double PrimitiveFaceSpeed(const PrimitiveEuler2D::State& left, const PrimitiveEuler2D::State& right,
+                          const PrimitiveEuler2D::Direction& normal, double gamma) {
+  const auto path = PrimitiveEuler2D::PathSpectrum(left, right, normal, gamma);
+  double speed = std::abs(path.advection) + path.acoustic;
+  for (const auto& w : {left, right}) {
+    const double physical = std::abs(w[1]*normal[0] + w[2]*normal[1]) +
+                            std::sqrt(gamma*w[3]/w[0])*std::hypot(normal[0],normal[1]);
+    speed = std::max(speed, physical);
+  }
+  if (!std::isfinite(speed) || speed <= 0) throw std::invalid_argument("Invalid primitive characteristic speed");
+  return speed;
+}
+}
 
 void CPrimitiveEulerSolver::ValidateConfiguration(const CConfig& config) {
   if (config.GetPrimitiveRepresentation() != "NODE" || config.GetPrimitiveFaceQuadrature() != "AGGREGATED")
@@ -56,8 +80,7 @@ CPrimitiveEulerSolver::CPrimitiveEulerSolver(CGeometry* geometry, CConfig* confi
 }
 
 void CPrimitiveEulerSolver::EvolutionUnavailable() {
-  throw std::logic_error("Primitive Euler phase 4: use ComputeSpatialResidual; driver integration and time "
-                         "advancement are not implemented");
+  throw std::logic_error("Primitive Euler phase 5: use Forward Euler; this integration/residual route is unavailable");
 }
 
 void CPrimitiveEulerSolver::PrepareReconstruction(CGeometry& geometry, const CConfig& config) {
@@ -143,13 +166,14 @@ CPrimitiveEulerSolver::State CPrimitiveEulerSolver::ReconstructAt(unsigned long 
 
 CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidual(
     CGeometry* geometry, const CConfig* config, double time, const BoundaryState& boundaryState, const Source& source) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  return EvaluateSpatialResidual(geometry, config, time, boundaryState, source, true);
+}
+
+CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResidual(
+    CGeometry* geometry, const CConfig* config, double time, const BoundaryState& boundaryState,
+    const Source& source, bool commit) {
   using namespace PrimitiveEuler2D;
-  if (omp_in_parallel()) throw std::logic_error("Primitive spatial operator must be called outside OpenMP regions");
-  if (evaluating.test_and_set()) throw std::logic_error("Concurrent primitive spatial evaluation on the same solver");
-  struct Unlock {
-    std::atomic_flag& flag;
-    ~Unlock() { flag.clear(); }
-  } unlock{evaluating};
   if (!geometry || !config || geometry != originalGeometry || config != originalConfig || !std::isfinite(time))
     throw std::invalid_argument("Primitive residual requires original static geometry/configuration and finite time");
   ValidateConfiguration(*config);
@@ -165,12 +189,17 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidu
   SpatialResult result;
   for (auto* field : {&result.faces, &result.volume, &result.boundary, &result.source, &result.rhs}) field->resize(nPoint);
 
+  result.spectralRadius.resize(nPoint, 0.0);
+
   // Serial deterministic assembly: each edge evaluated ONCE, both signs +.
   // No conservative edge-flux reducer and no shared OpenMP edge scatter.
   for (unsigned long e = 0; e < metrics->GetnEdge(); ++e) {
     const auto& face = metrics->GetFace(e);
-    const auto waves = ComputeFluctuations(ReconstructAt(face.first, face.point),
-                                         ReconstructAt(face.second, face.point), face.normal, gamma);
+    const auto left = ReconstructAt(face.first, face.point), right = ReconstructAt(face.second, face.point);
+    const double speed = PrimitiveFaceSpeed(left, right, face.normal, gamma);
+    result.spectralRadius[face.first] += speed;
+    result.spectralRadius[face.second] += speed;
+    const auto waves = ComputeFluctuations(left, right, face.normal, gamma);
     for (unsigned k = 0; k < 4; ++k) {
       result.faces[face.first][k] += waves.minus[k];
       result.faces[face.second][k] += waves.plus[k];
@@ -190,6 +219,7 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidu
     const double measure = std::hypot(face.normal[0], face.normal[1]);
     const Direction unit{{face.normal[0] / measure, face.normal[1] / measure}};
     const auto exterior = boundaryState ? boundaryState(face.point, time, interior, unit, face.marker) : far;
+    result.spectralRadius[face.node] += PrimitiveFaceSpeed(interior, exterior, face.normal, gamma);
     const auto incoming = ComputeFluctuations(interior, exterior, face.normal, gamma).minus;
     for (unsigned k = 0; k < 4; ++k) result.boundary[face.node][k] += incoming[k];
   }
@@ -199,6 +229,8 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidu
                        SU2_TYPE::GetValue(geometry->nodes->GetCoord(i, 1))}};
     if (source) result.source[i] = source(x, time);
     const double volume = metrics->GetCell(i).volume;
+    if (!std::isfinite(result.spectralRadius[i]) || result.spectralRadius[i] <= 0)
+      throw std::invalid_argument("Invalid primitive spectral sum");
     for (unsigned k = 0; k < 4; ++k) {
       result.rhs[i][k] = -(result.faces[i][k] + result.volume[i][k] + result.boundary[i][k]) / volume + result.source[i][k];
       integrated[i][k] = -volume * result.rhs[i][k];
@@ -206,10 +238,69 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidu
         throw std::invalid_argument("Non-finite primitive spatial residual/source");
     }
   }
-  // Commit only a complete, finite residual. No stale additions on repeated calls.
-  for (unsigned long i = 0; i < nPoint; ++i)
-    for (unsigned k = 0; k < 4; ++k) LinSysRes(i, k) = integrated[i][k];
+  if (commit) CommitSpatialResidual(result);
   return result;
+}
+
+void CPrimitiveEulerSolver::CommitSpatialResidual(const SpatialResult& result) {
+  for (unsigned long i = 0; i < nPoint; ++i)
+    for (unsigned k = 0; k < 4; ++k) LinSysRes(i,k) = -metrics->GetCell(i).volume * result.rhs[i][k];
+}
+
+double CPrimitiveEulerSolver::EstimateTimeStep(CGeometry* geometry, const CConfig* config,
+                                              double time, double cfl, const BoundaryState& boundary) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (!std::isfinite(cfl) || cfl <= 0) throw std::invalid_argument("Primitive CFL must be finite and positive");
+  const auto result = EvaluateSpatialResidual(geometry, config, time, boundary, {}, false);
+  double dt = std::numeric_limits<double>::max();
+  for (unsigned long i = 0; i < nPoint; ++i)
+    dt = std::min(dt, cfl * (metrics->GetCell(i).volume / result.spectralRadius[i]));
+  if (!std::isfinite(dt) || dt <= 0 || !std::isfinite(time+dt) || time+dt <= time)
+    throw std::invalid_argument("Primitive time step is not finite, positive and representable");
+  return dt;
+}
+
+CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::AdvanceExplicitEuler(
+    CGeometry* geometry, const CConfig* config, double time, double dt,
+    const BoundaryState& boundary, const Source& source) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (!std::isfinite(time) || !std::isfinite(dt) || dt <= 0 ||
+      !std::isfinite(time+dt) || time+dt <= time)
+    throw std::invalid_argument("Primitive Forward Euler requires a finite positive representable step");
+  auto result = EvaluateSpatialResidual(geometry, config, time, boundary, source, false);
+  std::vector<PrimitiveEuler2D::State> next(nPoint);
+  const double gamma = SU2_TYPE::GetValue(config->GetGamma());
+  for (unsigned long i = 0; i < nPoint; ++i) {
+    next[i] = nodes->GetPrimitiveState(i);
+    for (unsigned k = 0; k < 4; ++k) next[i][k] += dt * result.rhs[i][k];
+    try {
+      PrimitiveEuler2D::Validate(next[i], gamma);
+    } catch (const std::invalid_argument&) {
+      throw std::domain_error("Primitive Forward Euler rejected non-admissible candidate at node " + std::to_string(i));
+    }
+  }
+  // All candidate states validated before touching W, old solution, residual or time.
+  nodes->Set_OldSolution();
+  for (unsigned long i = 0; i < nPoint; ++i) nodes->SetPrimitiveState(i, next[i]);
+  CommitSpatialResidual(result);
+  physicalTime = time + dt;
+  return result;
+}
+
+void CPrimitiveEulerSolver::SetTime_Step(CGeometry* geometry, CSolver**, CConfig* config,
+                                        unsigned short mesh, unsigned long) {
+  if (!config || mesh != MESH_0) throw std::invalid_argument("Primitive time step requires finest mesh/configuration");
+  const double dt = EstimateTimeStep(geometry, config, physicalTime, SU2_TYPE::GetValue(config->GetCFL(mesh)));
+  for (unsigned long i = 0; i < nPoint; ++i) nodes->SetDelta_Time(i, dt);
+  Min_Delta_Time = Max_Delta_Time = dt;
+}
+
+void CPrimitiveEulerSolver::ExplicitEuler_Iteration(CGeometry* geometry, CSolver**, CConfig* config) {
+  const double dt = SU2_TYPE::GetValue(nodes->GetDelta_Time(0));
+  for (unsigned long i = 1; i < nPoint; ++i)
+    if (SU2_TYPE::GetValue(nodes->GetDelta_Time(i)) != dt)
+      throw std::invalid_argument("Primitive physical Forward Euler requires one global time step");
+  AdvanceExplicitEuler(geometry, config, physicalTime, dt);
 }
 
 void CPrimitiveEulerSolver::Upwind_Residual(CGeometry* geometry, CSolver**, CNumerics**, CConfig* config,

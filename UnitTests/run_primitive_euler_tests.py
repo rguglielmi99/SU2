@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     sources = [runner] + [root / 'UnitTests/SU2_CFD' / name for name in (
         'primitive_euler_geometry_tests.cpp', 'numerics/primitive_euler_2d_tests.cpp',
         'primitive_euler_solver_tests.cpp', 'primitive_euler_residual_tests.cpp',
-        'primitive_euler_accuracy_tests.cpp')]
+        'primitive_euler_accuracy_tests.cpp', 'primitive_euler_time_tests.cpp')]
     if args.asan:
         sources += [root / 'SU2_CFD/src' / name for name in (
             'solvers/CSolverFactory.cpp', 'solvers/CPrimitiveEulerSolver.cpp',
@@ -112,7 +112,7 @@ MUSCL_FLOW=NO
 SLOPE_LIMITER_FLOW=NONE
 OUTPUT_FILES=(RESTART)
 '''
-    checks = [('primitive', 'PRIMITIVE_EULER', '', 1, 'PRIMITIVE_EULER phase 4: spatial operator available'),
+    checks = [('primitive', 'PRIMITIVE_EULER', '', 1, 'PRIMITIVE_EULER phase 5: spatial operator and Forward Euler available'),
               ('euler', 'EULER', '', 0, 'Exit Success (SU2_CFD)'),
               ('harmonic', 'PRIMITIVE_EULER', 'TIME_DOMAIN=YES\nTIME_MARCHING=HARMONIC_BALANCE\nTIME_STEP=0.01\n',
                1, 'Harmonic Balance not yet implemented'),

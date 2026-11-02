@@ -324,7 +324,7 @@ TEST_CASE("Failed spatial evaluations preserve the previous residual and unlock 
   unchanged();
 }
 
-TEST_CASE("Upwind virtual entry computes spatial residual while time integration stays blocked", "[primitive-solver][primitive-residual]") {
+TEST_CASE("Upwind virtual entry computes spatial residual and requires a prepared Forward Euler step", "[primitive-solver][primitive-residual]") {
   MeshFixture fixture(xy, triangles, "PRIMITIVE_EULER", setup, "MARKER_FAR");
   CPrimitiveEulerSolver solver(fixture.geometry.get(), fixture.config.get(), 0);
   CSolver* base = &solver;
@@ -338,7 +338,7 @@ TEST_CASE("Upwind virtual entry computes spatial residual while time integration
     for (unsigned k = 0; k < 4; ++k)
       CHECK(solver.LinSysRes(i, k) == Approx(-direct.rhs[i][k] * solver.GetGeometryMetrics().GetCell(i).volume));
   CHECK_THROWS_AS(base->Upwind_Residual(fixture.geometry.get(), nullptr, nullptr, fixture.config.get(), 1), std::invalid_argument);
-  CHECK_THROWS_AS(base->ExplicitEuler_Iteration(fixture.geometry.get(), nullptr, fixture.config.get()), std::logic_error);
+  CHECK_THROWS_AS(base->ExplicitEuler_Iteration(fixture.geometry.get(), nullptr, fixture.config.get()), std::invalid_argument);
 }
 
 TEST_CASE("Spatial residual is invariant under node and element renumbering", "[primitive-solver][primitive-residual]") {

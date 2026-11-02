@@ -126,7 +126,7 @@ TEST_CASE("Primitive solver rejects unsupported setup without constructing evolu
   CHECK_THROWS_AS(CPrimitiveEulerSolver(implicit.geometry.get(), implicit.config.get(), 1), std::invalid_argument);
 }
 
-TEST_CASE("Primitive scaffold cannot silently report a numerical simulation", "[primitive-solver]") {
+TEST_CASE("Unavailable integration routes reject calls without changing primitive state", "[primitive-solver]") {
   MeshFixture fixture(points, elements, "PRIMITIVE_EULER", explicitEuler);
   CPrimitiveEulerSolver solver(fixture.geometry.get(), fixture.config.get(), MESH_0);
   CSolver* base = &solver;
@@ -138,8 +138,6 @@ TEST_CASE("Primitive scaffold cannot silently report a numerical simulation", "[
   const std::vector<std::function<void()>> calls{
       [&]() { base->Centered_Residual(nullptr, nullptr, nullptr, nullptr, 0, 0); },
       [&]() { base->Source_Residual(nullptr, nullptr, nullptr, nullptr, 0); },
-      [&]() { base->SetTime_Step(nullptr, nullptr, nullptr, 0, 0); },
-      [&]() { base->ExplicitEuler_Iteration(nullptr, nullptr, nullptr); },
       [&]() { base->ExplicitRK_Iteration(nullptr, nullptr, nullptr, 0); },
       [&]() { base->ClassicalRK4_Iteration(nullptr, nullptr, nullptr, 0); },
       [&]() { base->ImplicitEuler_Iteration(nullptr, nullptr, nullptr); }};
@@ -149,8 +147,7 @@ TEST_CASE("Primitive scaffold cannot silently report a numerical simulation", "[
       calls[call]();
       FAIL("Evolution method returned without throwing");
     } catch (const std::logic_error& error) {
-      CHECK(std::string(error.what()) == "Primitive Euler phase 4: use ComputeSpatialResidual; driver integration and time "
-                                        "advancement are not implemented");
+      CHECK(std::string(error.what()) == "Primitive Euler phase 5: use Forward Euler; this integration/residual route is unavailable");
     }
     for (unsigned long i = 0; i < points.size(); ++i) {
       CheckState(solver.GetPrimitiveNodes().GetPrimitiveState(i), before[i]);

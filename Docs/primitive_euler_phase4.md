@@ -1,5 +1,10 @@
 # Euler 2D primitivo — FASE 4: operatore spaziale
 
+La [FASE 5 Forward Euler](primitive_euler_phase5.md) aggiunge ora l'avanzamento
+tramite API del solver, con rifiuto transazionale dei passi non ammissibili.
+Il driver CLI generale rimane bloccato; gli audit spaziali qui riportati
+restano il riferimento della ricostruzione affine.
+
 Il [rapporto finale sui limiter](primitive_euler_phase4_limiter_audit.md)
 misura direttamente l'operatore affine con NONE, VENKATAKRISHNAN e
 BARTH_JESPERSEN, senza modificare produzione o iniziare la FASE 5.
@@ -20,13 +25,13 @@ L'[audit dell'operatore affine](primitive_euler_phase4_order_audit.md) documenta
 ordine globale circa 1.5 sulla famiglia regolare e circa 1 sulle mesh distorte.
 Il criterio globale >=2 non è soddisfatto da questo operatore. Restano aperti
 il difetto di consistenza MUSCL NO e i limiti di MEAN_COEFF.
-La FASE 5 non è implementata; il percorso evolutivo CLI rimane bloccato.
+Forward Euler è disponibile tramite API in FASE 5; il percorso evolutivo CLI generale rimane bloccato.
 
 La fase 4 implementa il residuale spaziale per **NODE / AGGREGATED**, su mesh
 triangolari 2D statiche e seriali. Le incognite restano esclusivamente
 `W=(rho,u,v,p)`. Non cambia il kernel path/Roe della fase 1 né il solver Euler
-conservativo. La fase 5 introdurrà l'avanzamento temporale e il collegamento
-completo al driver/output: una simulazione primitiva CLI resta esplicitamente
+conservativo. La fase 5 aggiunge Forward Euler tramite API; il collegamento
+completo al driver/output resta da realizzare: una simulazione primitiva CLI resta esplicitamente
 bloccata, anche selezionando Eulero esplicito.
 
 ## Operatore e convenzioni
