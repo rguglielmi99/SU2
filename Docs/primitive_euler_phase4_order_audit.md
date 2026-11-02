@@ -1,9 +1,16 @@
 # FASE 4 — Audit mirato dell'ordine spaziale
 
+Il nuovo [Passaggio I sull'irregolarità e sul contatto](primitive_euler_phase4_irregular_audit.md)
+separa il difetto dissipativo senza MUSCL dalla consistenza debole scalare,
+e confronta gradienti/segmenti su jitter e deformazioni lisce. Non modifica
+il solver e non dichiara risolti questi limiti in produzione.
+
 Questo rapporto descrive l'operatore affine mantenuto nel branch principale.
 L'esperimento quadratico completo e i suoi risultati restano nel branch locale
 `experiment/primitive-quadratic-boundary`, commit `d1732e90e3`.
-Qui non sono presenti fit numerici quadratici né test che richiedano le loro API.
+Il checkpoint qui descritto non includeva fit numerici quadratici. Il nuovo
+Passaggio I collegato sopra aggiunge un fit esclusivamente diagnostico dei
+gradienti, senza dipendere dalle API dell’esperimento archiviato.
 Le sostituzioni analitiche di G/H sono esclusivamente diagnostiche locali ai test:
 servono a isolare l'errore della traccia e non entrano nell'operatore di produzione.
 

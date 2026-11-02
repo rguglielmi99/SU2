@@ -1,5 +1,14 @@
 # Euler 2D primitivo — FASE 4: operatore spaziale
 
+Il [rapporto finale sui limiter](primitive_euler_phase4_limiter_audit.md)
+misura direttamente l'operatore affine con NONE, VENKATAKRISHNAN e
+BARTH_JESPERSEN, senza modificare produzione o iniziare la FASE 5.
+
+Il nuovo [Passaggio I sull'irregolarità e sul contatto](primitive_euler_phase4_irregular_audit.md)
+separa il difetto dissipativo senza MUSCL dalla consistenza debole scalare,
+e confronta gradienti/segmenti su jitter e deformazioni lisce. Non modifica
+il solver e non dichiara risolti questi limiti in produzione.
+
 Il branch principale mantiene il solver **MUSCL affine NODE / AGGREGATED**,
 le correzioni di robustezza e le diagnostiche indipendenti dell'ordine.
 L'esperimento quadratico completo è archiviato nel branch locale
