@@ -1,0 +1,63 @@
+{
+  "file": "signed_defects.csv.gz",
+  "sha256": "0fe4632364a0ca91da019a497c1b21efc0810bced24d3c773226ba3d91b7b319",
+  "representation": "pointwise primitive / matched conservative",
+  "conservative_boundary": "excluded; no zero truncation error inferred",
+  "raw_location": "/private/tmp/su2-6b3/analysis/signed_defects.csv.gz",
+  "prior_files_sha256": {
+    "Docs/primitive_euler_phase6b2_errors.csv": "341a0293c6ceeeb9ea0e5440e053b6aff2d1b3a8c34cb849899ec69f3619d4c1",
+    "Docs/primitive_euler_phase6b2_order_stability.csv": "afe96a5502d6a1624a0f16219bd098835e5d95a2cc89dbbb91a8465fe6b1b6d2",
+    "Docs/primitive_euler_phase6b2_evolution.md": "b9e2b6eb5e8759780ddd7568b585244f84dc46b5f774ebab961ccf13664c6d7b",
+    "Docs/primitive_euler_phase6a1_dof_initialization.csv": "f45f0e2c30801c57e171842969a17a9170e99547a34c132d097f436911d0326b",
+    "Docs/primitive_euler_phase6b2_temporal.csv": "db0cc654d3de9030919c898cab84e890797dcf0d57972d458c3f2eb6bdf18293",
+    "Docs/primitive_euler_phase6b1_mms_checks.csv": "f1f7ab73253f4ebff696e510df4f99e50bf569a62c9c5557dcf3cb1232a3db01",
+    "Docs/primitive_euler_phase6a1_dof_geometry.csv": "717a5effaeb0c16684009e21ecc1e76819e411a107d84bec1e85e7ad77bab7ba",
+    "Docs/primitive_euler_phase6b2_checks.csv": "afc3097ae5938dc2c5b118b2ed3a1e9dde9da61a9988824014b85294a13d846e",
+    "Docs/primitive_euler_phase6a1_dof.md": "54b7ebd71f84f4f4739de3e79d34c7a035b7f035dfff1b9535651762b99fa763",
+    "Docs/primitive_euler_phase6a1_dof_affine.csv": "cafc32d8b48e867d99179b39ad7a2c4dc607e7b755bb246c35ef26976a0f049c",
+    "Docs/primitive_euler_phase6b1_mms_errors.csv": "b18ab588a3dc425676833afd1c07e01f9aae121a8271291a0a587625bad4ab65",
+    "Docs/primitive_euler_phase6a1_dof_errors.csv": "9c4672d38da57e36ec5e81af484fa67dedbb4f3754445ca7be77465d64c8cdf2",
+    "Docs/primitive_euler_phase6a1_dof_temporal.csv": "04d965dfb201beb31e6eed341918e783fa691d65cbb496d34c0e6b7f31650d05",
+    "Docs/primitive_euler_phase6b1_mms.md": "92b581f642a2ce9387ee687c20bb016fbb3e681190ea92ac0fa250a1d45e33d1",
+    "Docs/primitive_euler_phase6a1_dof_affine_temporal.csv": "879d1856c0f4e9ad62bd0e8bcac65b3f05d11f13a9e76ba3656c4e69226a8ac3",
+    "Docs/primitive_euler_phase6a1_dof_affine_initialization.csv": "dedac57e7d5443824ed11d3779e4aa02cd93ac5c8420df96d045c18bf32f69af",
+    "UnitTests/export_euler_dof_audit.py": "daa3d1b8b171cb1cdb9540e111890cee6f95f2ed976c46291febc9d9106efadb",
+    "UnitTests/run_euler_mms_audit.py": "0db556534d80e827b2ee290e9ff9547ad2a8d059699419d81ab465d06763eaba",
+    "UnitTests/export_euler_mms_audit.py": "bdd29937267580e08c09a8eade58051a923b88c3c302306a9d519e9ee73e307b",
+    "UnitTests/run_euler_dof_audit.py": "24184ea72eba2d283905666bb9b5e201e0aef2ba5c42cda271c859802999fe1f",
+    "UnitTests/run_euler_mms_evolution.py": "e1f5e21d6601027bcab113b534cb82b24d8bccc35630966172c82f93b0d9098e",
+    "UnitTests/export_euler_mms_evolution.py": "2f295a926771ecd7bc220f28683a1587811f55124de13b0589dc7e321a14ce69",
+    "UnitTests/SU2_CFD/euler_mms_audit.cpp": "34a0901a8b9e57e44b7e2aff959e9c82afa51454538d26a4bad84473ef272fc8",
+    "UnitTests/SU2_CFD/euler_dof_audit.cpp": "e64c15e7a7756f0a6c834c8aa5b8cb48743ffb167f1915d77989da98a6a807f6",
+    "UnitTests/SU2_CFD/euler_mms_test_support.hpp": "d48f79bf6bf717fe1120d73c2f1fbdb0c7b63ca58231563c893c9eb9564c7d5f",
+    "UnitTests/SU2_CFD/euler_mms_evolution.cpp": "feb7ce3939b5abca4a3902ffda7a071879275437d31a49ac38e9123bc944d26c",
+    "UnitTests/SU2_CFD/euler_common_mms.hpp": "4bfc0dedb0d842af0e0f7b18de3a68041f1188ec76529ce5e9552791f936c6a5",
+    "UnitTests/SU2_CFD/euler_mms_analytic_tests.cpp": "68acb1cc2b9a2abd256a7108bfc9bae10d457cf1adceea1192c5f924846202ee"
+  },
+  "builds": {
+    "defect-build": {
+      "mode": "defect",
+      "time": 0.1,
+      "original": "/Users/riccardoguglielmi/SU2/UnitTests/SU2_CFD/euler_mms_audit.cpp",
+      "original_sha256": "34a0901a8b9e57e44b7e2aff959e9c82afa51454538d26a4bad84473ef272fc8",
+      "generated_sha256": "a96851941c221033c0ad36e3d9dacca21e591f7244770ec3f72c63c16ecd06e1",
+      "executable_sha256": "85495be95f0021d91314ad528de9a29406249aa02aff99c4d2db325efd239315"
+    },
+    "evolution-build": {
+      "mode": "evolution",
+      "time": 0.1,
+      "original": "/Users/riccardoguglielmi/SU2/UnitTests/SU2_CFD/euler_mms_evolution.cpp",
+      "original_sha256": "feb7ce3939b5abca4a3902ffda7a071879275437d31a49ac38e9123bc944d26c",
+      "generated_sha256": "22922719961bf732a6574d6e7bc1b190b4f2a254d91bc5d466afccdcb1710ca6",
+      "executable_sha256": "fc3e190aa172ede879ef7041b3b1e12af72f961d8a8016d4ee3e6b5321893179"
+    },
+    "long-build": {
+      "mode": "evolution",
+      "time": 0.2,
+      "original": "/Users/riccardoguglielmi/SU2/UnitTests/SU2_CFD/euler_mms_evolution.cpp",
+      "original_sha256": "feb7ce3939b5abca4a3902ffda7a071879275437d31a49ac38e9123bc944d26c",
+      "generated_sha256": "1eb01a0f822b66e9dfb8b9590b58a6d41fb0531900c135cd74a969036fcc5535",
+      "executable_sha256": "128516bbda34434d43c43c4d1698ce17c7082e6414b8945c69863ef1395da720"
+    }
+  }
+}
