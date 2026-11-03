@@ -1,0 +1,9 @@
+family,N,points,triangles,h,jitter_seed,jitter_x_over_h,jitter_y_over_h,core_diameter_over_h,dt_coefficient,final_time,finest_divisor,steps,dt
+regular,8,81,128,1.25,none: fixed deterministic sine/cosine phases,0,0,1.6,0.02,0.5,8,128,0.00390625
+regular,16,289,512,0.625,none: fixed deterministic sine/cosine phases,0,0,3.2,0.02,0.5,8,512,0.0009765625
+regular,32,1089,2048,0.3125,none: fixed deterministic sine/cosine phases,0,0,6.4,0.02,0.5,8,2048,0.000244140625
+regular,64,4225,8192,0.15625,none: fixed deterministic sine/cosine phases,0,0,12.8,0.02,0.5,8,8192,6.103515625e-05
+jitter,8,81,128,1.25,none: fixed deterministic sine/cosine phases,0.18,0.16,1.6,0.02,0.5,8,128,0.00390625
+jitter,16,289,512,0.625,none: fixed deterministic sine/cosine phases,0.18,0.16,3.2,0.02,0.5,8,512,0.0009765625
+jitter,32,1089,2048,0.3125,none: fixed deterministic sine/cosine phases,0.18,0.16,6.4,0.02,0.5,8,2048,0.000244140625
+jitter,64,4225,8192,0.15625,none: fixed deterministic sine/cosine phases,0.18,0.16,12.8,0.02,0.5,8,8192,6.103515625e-05

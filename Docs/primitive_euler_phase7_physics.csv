@@ -1,0 +1,2 @@
+gamma,beta,rho_inf,p_inf,u_inf,v_inf,xmin,xmax,ymin,ymax,center_initial_x,center_initial_y,final_time,minimum_center_boundary_distance,boundary_velocity_envelope,boundary_density_envelope,boundary_pressure_envelope,continuous_pressure_min,continuous_density_min,continuous_velocity_perturbation_max
+1.4,2,1,1,1,1,-5,5,-5,5,-0.25,-0.25,0.5,4.75,3.142724808931302e-05,1.563393858816653e-11,2.188749181897265e-11,0.8689305005545671,0.9045194020842982,0.3183098861837907

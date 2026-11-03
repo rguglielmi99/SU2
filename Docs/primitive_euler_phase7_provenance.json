@@ -1,0 +1,78 @@
+{
+  "head": "5c60ffa989",
+  "build": {
+    "original_sha256": "feb7ce3939b5abca4a3902ffda7a071879275437d31a49ac38e9123bc944d26c",
+    "generated_sha256": "7ede8ce2e11f8a993a30a1eac6054c522c431ce3633a32ea894eb5afd0b24392",
+    "executable_sha256": "f5f639a8f712b26994a771dcff1515e0d76dfc55817e65e569da75928541d92d"
+  },
+  "previous_files_sha256": {
+    "UnitTests/run_euler_asymptotic_study.py": "5c07900ae4c1fd272b7838a1410ff8a3285b776556848776430e96ef914eaee9",
+    "UnitTests/run_euler_asymptotic_campaign.py": "b0590336279767f8dc5632804af2f4dc7e9172e7747c7d45e908748c98378303",
+    "UnitTests/export_euler_dof_audit.py": "daa3d1b8b171cb1cdb9540e111890cee6f95f2ed976c46291febc9d9106efadb",
+    "UnitTests/run_euler_mms_audit.py": "0db556534d80e827b2ee290e9ff9547ad2a8d059699419d81ab465d06763eaba",
+    "UnitTests/export_euler_mms_audit.py": "bdd29937267580e08c09a8eade58051a923b88c3c302306a9d519e9ee73e307b",
+    "UnitTests/run_euler_dof_audit.py": "24184ea72eba2d283905666bb9b5e201e0aef2ba5c42cda271c859802999fe1f",
+    "UnitTests/run_euler_mms_evolution.py": "e1f5e21d6601027bcab113b534cb82b24d8bccc35630966172c82f93b0d9098e",
+    "UnitTests/export_euler_mms_evolution.py": "2f295a926771ecd7bc220f28683a1587811f55124de13b0589dc7e321a14ce69",
+    "UnitTests/export_euler_asymptotic_study.py": "17f396e12aff0f50ed42d100f36de3f0b199d7822e05942825a50f6ef097d5d9",
+    "UnitTests/SU2_CFD/euler_mms_audit.cpp": "34a0901a8b9e57e44b7e2aff959e9c82afa51454538d26a4bad84473ef272fc8",
+    "UnitTests/SU2_CFD/euler_dof_audit.cpp": "e64c15e7a7756f0a6c834c8aa5b8cb48743ffb167f1915d77989da98a6a807f6",
+    "UnitTests/SU2_CFD/euler_mms_test_support.hpp": "d48f79bf6bf717fe1120d73c2f1fbdb0c7b63ca58231563c893c9eb9564c7d5f",
+    "UnitTests/SU2_CFD/euler_mms_evolution.cpp": "feb7ce3939b5abca4a3902ffda7a071879275437d31a49ac38e9123bc944d26c",
+    "UnitTests/SU2_CFD/euler_common_mms.hpp": "4bfc0dedb0d842af0e0f7b18de3a68041f1188ec76529ce5e9552791f936c6a5",
+    "UnitTests/SU2_CFD/euler_mms_analytic_tests.cpp": "68acb1cc2b9a2abd256a7108bfc9bae10d457cf1adceea1192c5f924846202ee",
+    "Docs/primitive_euler_phase6b2_errors.csv": "341a0293c6ceeeb9ea0e5440e053b6aff2d1b3a8c34cb849899ec69f3619d4c1",
+    "Docs/primitive_euler_phase6b3_rings.csv": "1d72cb7baf182f6ce086922d2454e5c268933a2b76d7bf17748de7bf35e22aa1",
+    "Docs/primitive_euler_phase6b2_order_stability.csv": "afe96a5502d6a1624a0f16219bd098835e5d95a2cc89dbbb91a8465fe6b1b6d2",
+    "Docs/primitive_euler_phase6b2_evolution.md": "b9e2b6eb5e8759780ddd7568b585244f84dc46b5f774ebab961ccf13664c6d7b",
+    "Docs/primitive_euler_phase6a1_dof_initialization.csv": "f45f0e2c30801c57e171842969a17a9170e99547a34c132d097f436911d0326b",
+    "Docs/primitive_euler_phase6b3_checks.csv": "7e08fba6f431f2f9a7003b29c66bca07247b4dc66ef6681920d3cbc7459787cb",
+    "Docs/primitive_euler_phase6b2_temporal.csv": "db0cc654d3de9030919c898cab84e890797dcf0d57972d458c3f2eb6bdf18293",
+    "Docs/primitive_euler_phase6b1_mms_checks.csv": "f1f7ab73253f4ebff696e510df4f99e50bf569a62c9c5557dcf3cb1232a3db01",
+    "Docs/primitive_euler_phase6a1_dof_geometry.csv": "717a5effaeb0c16684009e21ecc1e76819e411a107d84bec1e85e7ad77bab7ba",
+    "Docs/primitive_euler_phase6b3_temporal.csv": "2277717c6dcc331f53f06d51e3ef5fb9073d4d9f28da41a2c62fbc88da55b074",
+    "Docs/primitive_euler_phase6b2_checks.csv": "afc3097ae5938dc2c5b118b2ed3a1e9dde9da61a9988824014b85294a13d846e",
+    "Docs/primitive_euler_phase6a1_dof.md": "54b7ebd71f84f4f4739de3e79d34c7a035b7f035dfff1b9535651762b99fa763",
+    "Docs/primitive_euler_phase6b3_asymptotic_study.md": "396e56ac01a671382f3004448024b331819167e2efeb9efc4d80dd4e1c17db45",
+    "Docs/primitive_euler_phase6b3_reproduction.csv": "3bd68774eb81d02f1ae25e2af5de94eac4ff0577b1c49e5edc1ea62483e11b16",
+    "Docs/primitive_euler_phase6a1_dof_affine.csv": "cafc32d8b48e867d99179b39ad7a2c4dc607e7b755bb246c35ef26976a0f049c",
+    "Docs/primitive_euler_phase6b3_defects.csv": "257844a50b784dc5f69c38944bc6f68074503bf46f3bb942e993b789d4bc1ad9",
+    "Docs/primitive_euler_phase6b3_provenance.json": "8a6cea2325c1d785ebf3086222376145fb0dad4a636d2d674e805cab35ab67dc",
+    "Docs/primitive_euler_phase6b3_contributions.csv": "33391efc65d23f46e457d6fc203a0a815da63a1fbd2d28921a6f36f023fe3181",
+    "Docs/primitive_euler_phase6b1_mms_errors.csv": "b18ab588a3dc425676833afd1c07e01f9aae121a8271291a0a587625bad4ab65",
+    "Docs/primitive_euler_phase6b3_moments.csv": "5a5c7b36e806a8a9b0fc79e0ef05123a436a6101b7e56cdd571e839e44401df2",
+    "Docs/primitive_euler_phase6a1_dof_errors.csv": "9c4672d38da57e36ec5e81af484fa67dedbb4f3754445ca7be77465d64c8cdf2",
+    "Docs/primitive_euler_phase6a1_dof_temporal.csv": "04d965dfb201beb31e6eed341918e783fa691d65cbb496d34c0e6b7f31650d05",
+    "Docs/primitive_euler_phase6b1_mms.md": "92b581f642a2ce9387ee687c20bb016fbb3e681190ea92ac0fa250a1d45e33d1",
+    "Docs/primitive_euler_phase6b3_evolution.csv": "8cdfdfd06750373ab2f481cfd76963bb44e73565abc2a8ad2d4659caea4031e5",
+    "Docs/primitive_euler_phase6a1_dof_affine_temporal.csv": "879d1856c0f4e9ad62bd0e8bcac65b3f05d11f13a9e76ba3656c4e69226a8ac3",
+    "Docs/primitive_euler_phase6a1_dof_affine_initialization.csv": "dedac57e7d5443824ed11d3779e4aa02cd93ac5c8420df96d045c18bf32f69af"
+  },
+  "families": [
+    "regular",
+    "jitter"
+  ],
+  "N": [
+    8,
+    16,
+    32,
+    64
+  ],
+  "divisors": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "pilot": {
+    "executable_sha256": "f5f639a8f712b26994a771dcff1515e0d76dfc55817e65e569da75928541d92d",
+    "pilot": "regular N=16",
+    "writer": "XML roundtrip passed"
+  },
+  "vtu_files": 24,
+  "paraview": "5.13.2, native VTK/PVD reader, no rendering/GUI",
+  "analytic_residual_primitive": 6.93889e-17,
+  "analytic_residual_conservative": 1.94289e-16,
+  "derivative_FD": 5.5455e-11,
+  "flux_FD": 2.22045e-10
+}
