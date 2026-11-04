@@ -20,7 +20,10 @@ struct BoundaryMarker {
 };
 struct QuietGeometryOutput {
   std::ostringstream sink;
-  std::streambuf* previous = std::cout.rdbuf(sink.rdbuf());
+  std::streambuf* previous;
+  explicit QuietGeometryOutput(bool quiet=true) : previous(std::cout.rdbuf()) {
+    if (quiet) std::cout.rdbuf(sink.rdbuf());
+  }
   ~QuietGeometryOutput() { std::cout.rdbuf(previous); }
 };
 
@@ -33,7 +36,7 @@ struct MeshFixture {
   MeshFixture(const std::vector<Direction>& xy, const std::vector<Triangle>& triangles,
               const std::string& solver = "EULER", const std::string& options = "",
               const std::string& markerOption = "MARKER_CUSTOM",
-              std::vector<BoundaryMarker> markers = {}, bool reverseBoundary = false) {
+              std::vector<BoundaryMarker> markers = {}, bool reverseBoundary = false, bool quietOutput = true) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     for (unsigned attempt = 0;; ++attempt) {
       directory = std::filesystem::temp_directory_path() /
@@ -64,11 +67,15 @@ struct MeshFixture {
         mesh << "3 " << edge[reverseBoundary ? 1 : 0] << " " << edge[reverseBoundary ? 0 : 1] << "\n";
     }
     mesh.close();
-    QuietGeometryOutput quiet;
+    QuietGeometryOutput quiet(quietOutput);
     std::stringstream text;
-    text << "SOLVER= " << solver << "\nMGLEVEL=0\n" << markerOption << "=(";
-    for (unsigned m = 0; m < markers.size(); ++m) text << (m ? "," : "") << markers[m].tag;
-    text << ")\nMESH_FILENAME= " << filename.string() << "\n" << options;
+    text << "SOLVER= " << solver << "\nMGLEVEL=0\n";
+    if (!markerOption.empty()) {
+      text << markerOption << "=(";
+      for (unsigned m = 0; m < markers.size(); ++m) text << (m ? "," : "") << markers[m].tag;
+      text << ")\n";
+    }
+    text << "MESH_FILENAME= " << filename.string() << "\n" << options;
     config.reset(new CConfig(text, SU2_COMPONENT::SU2_CFD, false));
     {
       CPhysicalGeometry input(config.get(), 0, 1);

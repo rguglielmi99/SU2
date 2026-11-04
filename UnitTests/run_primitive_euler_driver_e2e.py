@@ -93,6 +93,7 @@ def main():
     p.add_argument('--negative-only',action='store_true')
     p.add_argument('--reference-only',action='store_true')
     p.add_argument('--reference-executable',type=Path)
+    p.add_argument('--skip-negative',action='store_true',help='Run unchanged phase-8 positive comparisons only; later BC phases have their own negative contract')
     a=p.parse_args()
     exe=a.executable.resolve();out=a.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
     if a.reference_only:
@@ -175,7 +176,7 @@ def main():
                 row['p_l2']=np.log2(old['l2']/row['l2']) if old and min(old['l2'],row['l2'])>1e-12 else ''
                 previous[key]=row
             write(out/'errors.csv',errors)
-    if a.pilot:return
+    if a.pilot or a.skip_negative:return
     base=config('mesh.su2',8,True)
     variants={'implicit':('TIME_DISCRE_FLOW=EULER_EXPLICIT','TIME_DISCRE_FLOW=EULER_IMPLICIT','EULER_EXPLICIT'),
         'multigrid':('MGLEVEL=0','MGLEVEL=2','multigrid'),

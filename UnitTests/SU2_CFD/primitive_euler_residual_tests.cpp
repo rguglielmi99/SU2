@@ -360,7 +360,7 @@ TEST_CASE("Spatial residual is invariant under node and element renumbering", "[
   for (unsigned i = 0; i < 5; ++i) Check(rb.rhs[permutation[i]], ra.rhs[i]);
 }
 
-TEST_CASE("Unaudited reconstruction variants and boundary kinds are rejected explicitly", "[primitive-solver][primitive-residual]") {
+TEST_CASE("Unaudited reconstruction variants and incompatible slip data are rejected explicitly", "[primitive-solver][primitive-residual]") {
   for (const std::string option : {"SLOPE_LIMITER_FLOW=VAN_ALBADA_EDGE\n", "MUSCL_KAPPA_FLOW=0.3\n"}) {
     INFO(option);
     MeshFixture fixture(xy, triangles, "PRIMITIVE_EULER", "TIME_DISCRE_FLOW=EULER_EXPLICIT\n"
@@ -369,6 +369,8 @@ TEST_CASE("Unaudited reconstruction variants and boundary kinds are rejected exp
   }
   MeshFixture symmetry(xy, triangles, "PRIMITIVE_EULER", setup, "MARKER_SYM");
   CPrimitiveEulerSolver solver(symmetry.geometry.get(), symmetry.config.get(), 0);
+  // Phase 9 supports symmetry, but the default velocity (.5,.3) is not
+  // tangent to this closed boundary. It must fail rather than be clipped.
   CHECK_THROWS_AS(solver.ComputeSpatialResidual(symmetry.geometry.get(), symmetry.config.get(), 0, extrapolate),
                   std::invalid_argument);
 }

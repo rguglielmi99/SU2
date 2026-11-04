@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
 #include "../../include/solvers/CPrimitiveEulerSolver.hpp"
+#include "../../include/numerics/flow/primitive_euler_boundary.hpp"
 #include "../../include/gradients/computeGradientsGreenGauss.hpp"
 #include "../../include/gradients/computeGradientsLeastSquares.hpp"
 #include "../../include/limiters/computeLimiters.hpp"
 #include <limits>
+#include <map>
 
 namespace {
 struct PrimitiveEvaluationGuard {
@@ -177,12 +179,46 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
   if (!geometry || !config || geometry != originalGeometry || config != originalConfig || !std::isfinite(time))
     throw std::invalid_argument("Primitive residual requires original static geometry/configuration and finite time");
   ValidateConfiguration(*config);
+  // Boundary-only nodal constraints. Orthonormal bases also handle vertices
+  // where two independent slip planes meet. No interior gradient is changed.
+  std::vector<std::array<Direction,2>> wallBasis(nPoint);
+  std::vector<unsigned> wallRank(nPoint,0);
+  std::map<std::pair<unsigned long,unsigned short>,Direction> markerNormals;
   for (unsigned short marker = 0; marker < geometry->GetnMarker(); ++marker) {
     const auto kind = config->GetMarker_All_KindBC(marker);
-    if (kind != CUSTOM_BOUNDARY && kind != FAR_FIELD)
-      throw std::invalid_argument("Primitive phase 4 boundaries support CUSTOM or FAR only");
-    if (kind == CUSTOM_BOUNDARY && !boundaryState)
+    if (kind != CUSTOM_BOUNDARY && kind != FAR_FIELD && kind != EULER_WALL && kind != SYMMETRY_PLANE &&
+        kind != INLET_FLOW && kind != OUTLET_FLOW && kind != SUPERSONIC_INLET && kind != SUPERSONIC_OUTLET)
+      throw std::invalid_argument("Primitive unsupported physical boundary kind");
+    if (kind != FAR_FIELD && kind != EULER_WALL && kind != SYMMETRY_PLANE && !boundaryState)
       throw std::invalid_argument("Primitive CUSTOM boundary requires a primitive exterior-state callback");
+    if (kind==FAR_FIELD && config->GetPrimitiveBoundaryMode()=="LOCAL_CHARACTERISTIC" && !boundaryState)
+      throw std::invalid_argument("Primitive LOCAL_CHARACTERISTIC FAR requires a configured physical exterior-state callback; no prescribed-state fallback");
+  }
+  for (const auto& f:metrics->GetBoundaryFaces()) {
+    const auto kind=config->GetMarker_All_KindBC(f.marker);
+    if (kind!=EULER_WALL && kind!=SYMMETRY_PLANE) continue;
+    Direction n=f.normal;
+    const double area=std::hypot(n[0],n[1]);
+    for (auto& x:n) x/=area;
+    const auto inserted=markerNormals.emplace(std::make_pair(f.node,f.marker),n);
+    if (!inserted.second) {
+      const auto& other=inserted.first->second;
+      if (std::abs(other[0]*n[1]-other[1]*n[0])>256*std::numeric_limits<double>::epsilon())
+        throw std::invalid_argument("Primitive slip requires locally straight marker segments: split polygon corners into separate markers; curved-wall nodal normals are not implemented");
+    }
+    const auto w=nodes->GetPrimitiveState(f.node);
+    if (std::abs(w[1]*n[0]+w[2]*n[1])>256*std::numeric_limits<double>::epsilon()*std::max(1.,std::hypot(w[1],w[2])))
+      throw std::invalid_argument("Primitive slip wall requires compatible initial nodal normal velocity; no hidden state projection");
+    for (unsigned j=0;j<wallRank[f.node];++j) {
+      const auto& b=wallBasis[f.node][j];
+      const double dot=n[0]*b[0]+n[1]*b[1];
+      for (unsigned d=0;d<2;++d) n[d]-=dot*b[d];
+    }
+    const double mag=std::hypot(n[0],n[1]);
+    if (wallRank[f.node]<2 && mag>256*std::numeric_limits<double>::epsilon()) {
+      for (auto& x:n) x/=mag;
+      wallBasis[f.node][wallRank[f.node]++]=n;
+    }
   }
   PrepareReconstruction(*geometry, *config);
   const double gamma = SU2_TYPE::GetValue(config->GetGamma());
@@ -218,7 +254,10 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
     const auto interior = ReconstructAt(face.node, face.point);
     const double measure = std::hypot(face.normal[0], face.normal[1]);
     const Direction unit{{face.normal[0] / measure, face.normal[1] / measure}};
-    const auto exterior = boundaryState ? boundaryState(face.point, time, interior, unit, face.marker) : far;
+    const auto kind=config->GetMarker_All_KindBC(face.marker);
+    const auto exterior = kind==EULER_WALL || kind==SYMMETRY_PLANE ?
+        PrimitiveEuler2D::Boundary::Reflect(interior,unit,gamma) :
+        (boundaryState ? boundaryState(face.point, time, interior, unit, face.marker) : far);
     result.spectralRadius[face.node] += PrimitiveFaceSpeed(interior, exterior, face.normal, gamma);
     const auto incoming = ComputeFluctuations(interior, exterior, face.normal, gamma).minus;
     for (unsigned k = 0; k < 4; ++k) result.boundary[face.node][k] += incoming[k];
@@ -236,6 +275,21 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
       integrated[i][k] = -volume * result.rhs[i][k];
       if (!std::isfinite(result.rhs[i][k]) || !std::isfinite(integrated[i][k]))
         throw std::invalid_argument("Non-finite primitive spatial residual/source");
+    }
+  }
+  // Slip is a constraint on nodal velocity, not an artificial volume source.
+  // Add the boundary reaction that makes the COMPLETE velocity RHS tangent.
+  // Scalar equations, interior faces, volume, sources and FE remain untouched.
+  for (unsigned long i=0;i<nPoint;++i) {
+    const double volume=metrics->GetCell(i).volume;
+    for (unsigned j=0;j<wallRank[i];++j) {
+      const auto& n=wallBasis[i][j];
+      const double normalRhs=result.rhs[i][1]*n[0]+result.rhs[i][2]*n[1];
+      for (unsigned d=0;d<2;++d) {
+        const double correction=normalRhs*n[d];
+        result.rhs[i][1+d]-=correction;
+        result.boundary[i][1+d]+=volume*correction;
+      }
     }
   }
   if (commit) CommitSpatialResidual(result);

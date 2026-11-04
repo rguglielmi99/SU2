@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
 #include "../../include/iteration/CPrimitiveEulerIteration.hpp"
+#include "../../include/iteration/primitive_euler_boundary_config.hpp"
 #include "../../include/solvers/CPrimitiveEulerSolver.hpp"
 #include "../../include/output/COutput.hpp"
 #include "../../../Common/include/verification/isentropic_vortex.hpp"
@@ -14,6 +15,10 @@ void CPrimitiveEulerIteration::ValidateDriver(const CConfig& c) {
   if (SU2_MPI::GetSize()!=1 || omp_get_max_threads()!=1)
     throw std::invalid_argument("PRIMITIVE_EULER supports only serial mode: one MPI rank and one OpenMP thread.");
   CPrimitiveEulerSolver::ValidateConfiguration(c);
+  if (c.GetSystemMeasurements()!=SI)
+    throw std::invalid_argument("PRIMITIVE_EULER physical boundary adapter currently requires SYSTEM_MEASUREMENTS=SI");
+  if (c.GetnMarker_Periodic()!=0)
+    throw std::invalid_argument("PRIMITIVE_EULER periodic geometry/residual coupling is not implemented");
   if (c.GetVerification_Solution()!=VERIFICATION_SOLUTION::NONE)
     throw std::invalid_argument("PRIMITIVE_EULER driver does not support native KIND_VERIFICATION_SOLUTION/MMS; use PRIMITIVE_INITIALIZATION for its analytic benchmark.");
   if (c.GetGrid_Movement() || c.GetDeform_Mesh() || c.GetDirectDiff()!=NO_DERIVATIVE ||
@@ -36,8 +41,9 @@ void CPrimitiveEulerIteration::ValidateDriver(const CConfig& c) {
       throw std::invalid_argument(std::string("PRIMITIVE_EULER does not use native conservative flux option ")+option);
   const auto& initial=c.GetPrimitiveInitialization();
   const auto& boundary=c.GetPrimitiveBoundaryMode();
-  if ((initial!="UNIFORM" && initial!="ISENTROPIC_VORTEX") || (boundary!="UNIFORM" && boundary!="ISENTROPIC_VORTEX"))
-    throw std::invalid_argument("PRIMITIVE_INITIALIZATION and PRIMITIVE_BOUNDARY_MODE support UNIFORM or ISENTROPIC_VORTEX only.");
+  if ((initial!="UNIFORM" && initial!="FREESTREAM" && initial!="ISENTROPIC_VORTEX") ||
+      (boundary!="UNIFORM" && boundary!="ISENTROPIC_VORTEX" && boundary!="LOCAL_CHARACTERISTIC"))
+    throw std::invalid_argument("PRIMITIVE_INITIALIZATION supports UNIFORM, FREESTREAM or ISENTROPIC_VORTEX; boundary mode supports UNIFORM, ISENTROPIC_VORTEX or LOCAL_CHARACTERISTIC.");
   if ((initial=="ISENTROPIC_VORTEX") != (boundary=="ISENTROPIC_VORTEX"))
     throw std::invalid_argument("The vortex benchmark requires matching analytic initialization and exterior boundary mode.");
   if (initial=="ISENTROPIC_VORTEX" && std::abs(SU2_TYPE::GetValue(c.GetGamma())-1.4)>1e-14)
@@ -60,8 +66,15 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
       std::set<std::string> actual,declared;
       for (unsigned short m=0;m<g->GetnMarker();++m) {
         const auto kind=c->GetMarker_All_KindBC(m);
-        if (kind!=CUSTOM_BOUNDARY && kind!=FAR_FIELD)
-          throw std::invalid_argument("PRIMITIVE_EULER supports only MARKER_CUSTOM or MARKER_FAR exterior-state boundaries.");
+        if (!PrimitiveEulerBoundaryConfig::Supported(kind))
+          throw std::invalid_argument("PRIMITIVE_EULER unsupported physical boundary marker: "+c->GetMarker_All_TagBound(m));
+        if (kind==FAR_FIELD) {
+          if ((c->OptionIsSet("PRIMITIVE_BOUNDARY_MODE") && c->GetPrimitiveBoundaryMode()!="LOCAL_CHARACTERISTIC") || c->OptionIsSet("PRIMITIVE_BOUNDARY_STATE"))
+            throw std::invalid_argument("MARKER_FAR requires native physical freestream data and explicit LOCAL_CHARACTERISTIC mode; move prescribed/analytic exterior data to MARKER_CUSTOM, not PRIMITIVE_BOUNDARY_STATE on FAR.");
+          if (c->GetPrimitiveBoundaryMode()!="LOCAL_CHARACTERISTIC")
+            throw std::invalid_argument("Primitive finite-amplitude farfield compatibility remains under review; explicitly select PRIMITIVE_BOUNDARY_MODE=LOCAL_CHARACTERISTIC for the local linearized reservoir model.");
+          PrimitiveEulerBoundaryConfig::Freestream(*c);
+        }
         if (!actual.insert(c->GetMarker_All_TagBound(m)).second)
           throw std::invalid_argument("PRIMITIVE_EULER does not accept duplicate physical marker tags.");
       }
@@ -77,6 +90,10 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
           const auto* x=g->nodes->GetCoord(i);
           s->GetPrimitiveNodes().SetPrimitiveState(i,SU2IsentropicVortex::Evaluate(SU2_TYPE::GetValue(x[0]),SU2_TYPE::GetValue(x[1]),0.).w);
         }
+      if (c->GetPrimitiveInitialization()=="FREESTREAM") {
+        const auto state=PrimitiveEulerBoundaryConfig::Freestream(*c);
+        for (unsigned long i=0;i<g->GetnPoint();++i) s->GetPrimitiveNodes().SetPrimitiveState(i,state);
+      }
       c->SetPhysicalTime(0);
       c->SetDelta_UnstTimeND(c->GetDelta_UnstTime());
       output->SetHistoryOutput(g,container,c,0,0,0);
@@ -85,12 +102,9 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
     }
     const double time=s->GetPhysicalTime();
     c->SetPhysicalTime(time);
-    CPrimitiveEulerSolver::State exterior{};
-    for (unsigned k=0;k<4;++k) exterior[k]=SU2_TYPE::GetValue(c->GetPrimitiveBoundaryState()[k]);
-    const bool vortex=c->GetPrimitiveBoundaryMode()=="ISENTROPIC_VORTEX";
     const CPrimitiveEulerSolver::BoundaryState boundary=[=](const CPrimitiveEulerSolver::Direction& q,double t,
-        const CPrimitiveEulerSolver::State&,const CPrimitiveEulerSolver::Direction&,unsigned short) {
-      return vortex ? SU2IsentropicVortex::Evaluate(q[0],q[1],t).w : exterior;
+        const CPrimitiveEulerSolver::State& inside,const CPrimitiveEulerSolver::Direction& n,unsigned short marker) {
+      return PrimitiveEulerBoundaryConfig::Evaluate(*c,marker,q,t,inside,n);
     };
     double dt=SU2_TYPE::GetValue(c->GetDelta_UnstTime());
     if (c->GetUnst_CFL()>0) {

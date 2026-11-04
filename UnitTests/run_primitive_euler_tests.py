@@ -62,7 +62,8 @@ int main(int argc, char** argv) {
     sources = [runner] + [root / 'UnitTests/SU2_CFD' / name for name in (
         'primitive_euler_geometry_tests.cpp', 'numerics/primitive_euler_2d_tests.cpp',
         'primitive_euler_solver_tests.cpp', 'primitive_euler_residual_tests.cpp',
-        'primitive_euler_accuracy_tests.cpp', 'primitive_euler_time_tests.cpp')]
+        'primitive_euler_accuracy_tests.cpp', 'primitive_euler_time_tests.cpp',
+        'primitive_euler_boundary_tests.cpp')]
     if args.asan:
         sources += [root / 'SU2_CFD/src' / name for name in (
             'solvers/CSolverFactory.cpp', 'solvers/CPrimitiveEulerSolver.cpp',

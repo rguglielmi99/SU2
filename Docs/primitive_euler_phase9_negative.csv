@@ -1,0 +1,9 @@
+case,returncode,expected
+legacy_far,1,native physical freestream
+far_requires_opt_in,1,LOCAL_CHARACTERISTIC
+us_units,1,SYSTEM_MEASUREMENTS=SI
+bad_outlet_pressure,1,positive static pressure
+bad_inlet_direction,1,direction must point
+subsonic_supersonic_outlet,1,no incoming characteristics
+backflow,1,backflow
+periodic,1,periodic geometry/residual coupling
