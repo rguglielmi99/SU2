@@ -29,6 +29,7 @@
 #include "../../include/definition_structure.hpp"
 #include "../../include/output/COutput.hpp"
 #include "../../include/iteration/CIteration.hpp"
+#include "../../include/solvers/CPrimitiveEulerSolver.hpp"
 
 CSinglezoneDriver::CSinglezoneDriver(char* confFile,
                        unsigned short val_nZone,
@@ -116,7 +117,10 @@ void CSinglezoneDriver::Preprocess(unsigned long TimeIter) {
    this can be used for verification / MMS. This should also be more
    general once the drivers are more stable. ---*/
 
-  if (config_container[ZONE_0]->GetTime_Marching() != TIME_MARCHING::STEADY)
+  if (config_container[ZONE_0]->GetKind_Solver()==MAIN_SOLVER::PRIMITIVE_EULER)
+    config_container[ZONE_0]->SetPhysicalTime(static_cast<CPrimitiveEulerSolver*>(
+        solver_container[ZONE_0][INST_0][MESH_0][FLOW_SOL])->GetPhysicalTime());
+  else if (config_container[ZONE_0]->GetTime_Marching() != TIME_MARCHING::STEADY)
     config_container[ZONE_0]->SetPhysicalTime(static_cast<su2double>(TimeIter)*config_container[ZONE_0]->GetDelta_UnstTimeND());
   else
     config_container[ZONE_0]->SetPhysicalTime(0.0);

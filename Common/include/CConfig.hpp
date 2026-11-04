@@ -512,6 +512,11 @@ private:
   std::string PrimitiveFaceQuadrature = "AGGREGATED";
   std::string PrimitiveVolumeQuadrature = "MEAN_COEFF";
   std::array<su2double, 4> PrimitiveInitialState{{1.0, 0.5, 0.3, 1.0}};
+  std::string PrimitiveInitialization = "UNIFORM";
+  std::string PrimitiveBoundaryMode = "UNIFORM";
+  std::array<su2double, 4> PrimitiveBoundaryState{{1.0, 0.5, 0.3, 1.0}};
+  std::string PrimitiveGeometryAudit;
+  unsigned short PrimitiveRequestedMGLevels = 0;
   LIMITER Kind_SlopeLimit,      /*!< \brief Slope limiter (for the runtime eq. system). */
   Kind_SlopeLimit_Flow,         /*!< \brief Slope limiter for flow equations.*/
   Kind_SlopeLimit_Turb,         /*!< \brief Slope limiter for the turbulence equation.*/
@@ -3919,6 +3924,11 @@ public:
   const std::string& GetPrimitiveFaceQuadrature() const { return PrimitiveFaceQuadrature; }
   const std::string& GetPrimitiveVolumeQuadrature() const { return PrimitiveVolumeQuadrature; }
   const std::array<su2double, 4>& GetPrimitiveInitialState() const { return PrimitiveInitialState; }
+  const std::string& GetPrimitiveInitialization() const { return PrimitiveInitialization; }
+  const std::string& GetPrimitiveBoundaryMode() const { return PrimitiveBoundaryMode; }
+  const std::array<su2double, 4>& GetPrimitiveBoundaryState() const { return PrimitiveBoundaryState; }
+  const std::string& GetPrimitiveGeometryAudit() const { return PrimitiveGeometryAudit; }
+  void ConfigurePrimitiveDriverTime();
 
   /*!
    * \brief Return true if a fluid solver is in use.

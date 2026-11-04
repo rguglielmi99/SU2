@@ -334,7 +334,8 @@ CSolver* CSolverFactory::CreateSubSolver(SUB_SOLVER_TYPE kindSolver, CSolver **s
     case SUB_SOLVER_TYPE::PRIMITIVE_EULER:
       primitiveOwner.reset(new CPrimitiveEulerSolver(geometry, config, iMGLevel));
       genericSolver = primitiveOwner.get();
-      // Phase 3 registers storage and geometry only. No runnable integration yet.
+      // The primitive CIteration calls the existing transactional FE API once.
+      // Generic integration would assemble conservative BC/source routes again.
       metaData.integrationType = INTEGRATION_TYPE::NONE;
       break;
     case SUB_SOLVER_TYPE::RADIATION:

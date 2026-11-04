@@ -30,6 +30,7 @@ su2_cfd_src += files(['output/COutputFactory.cpp',
                       'output/CFlowOutput.cpp',
                       'output/CFlowIncOutput.cpp',
                       'output/CHeatOutput.cpp',
+                      'output/CPrimitiveEulerOutput.cpp',
                       'output/CMeshOutput.cpp',
                       'output/CNEMOCompOutput.cpp',
                       'output/CTurboOutput.cpp' ,
@@ -187,6 +188,7 @@ su2_cfd_src += files(['iteration/CIteration.cpp',
                       'iteration/CFEMFluidIteration.cpp',
                       'iteration/CFluidIteration.cpp',
                       'iteration/CHeatIteration.cpp',
+                      'iteration/CPrimitiveEulerIteration.cpp',
                       'iteration/CTurboIteration.cpp'])
 
 su2_cfd_src += files(['limiters/CLimiterDetails.cpp'])

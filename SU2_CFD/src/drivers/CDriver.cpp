@@ -93,6 +93,7 @@
 #include "../../include/integration/CIntegrationFactory.hpp"
 
 #include "../../include/iteration/CIterationFactory.hpp"
+#include "../../include/iteration/CPrimitiveEulerIteration.hpp"
 
 #include "../../../Common/include/parallelization/omp_structure.hpp"
 #include "../../../Common/include/grid_movement/CVolumetricMovementFactory.hpp"
@@ -118,15 +119,20 @@ CDriverBase(confFile, val_nZone, MPICommunicator), StopCalc(false), fsi(false), 
   PreprocessInput(config_container, driver_config);
 
   for (unsigned short zone = 0; zone < nZone; ++zone)
-    if (config_container[zone]->GetKind_Solver() == MAIN_SOLVER::PRIMITIVE_EULER)
-      SU2_MPI::Error("PRIMITIVE_EULER phase 5: spatial operator and Forward Euler available through the solver API; "
-                     "general driver integration and output are not implemented yet. CLI simulation is disabled.",
-                     CURRENT_FUNCTION);
+    if (config_container[zone]->GetKind_Solver() == MAIN_SOLVER::PRIMITIVE_EULER) {
+      config_container[zone]->ConfigurePrimitiveDriverTime();
+      try { CPrimitiveEulerIteration::ValidateDriver(*config_container[zone]); }
+      catch (const std::exception& e) { SU2_MPI::Error(e.what(),CURRENT_FUNCTION); }
+    }
+
+  if (driver_config->GetKind_Solver()==MAIN_SOLVER::PRIMITIVE_EULER) driver_config->ConfigurePrimitiveDriverTime();
 
   /*--- Retrieve dimension from mesh file ---*/
 
   nDim = CConfig::GetnDim(config_container[ZONE_0]->GetMesh_FileName(),
                           config_container[ZONE_0]->GetMesh_FileFormat());
+  if (config_container[ZONE_0]->GetKind_Solver()==MAIN_SOLVER::PRIMITIVE_EULER && nDim!=2)
+    SU2_MPI::Error("PRIMITIVE_EULER supports only 2D static triangular meshes in serial mode.",CURRENT_FUNCTION);
 
   /*--- Output preprocessing ---*/
 
@@ -1009,7 +1015,11 @@ void CDriver::InitializeSolver(CConfig* config, CGeometry** geometry, CSolver **
   solver = new CSolver**[config->GetnMGLevels()+1] ();
 
   for (iMesh = 0; iMesh <= config->GetnMGLevels(); iMesh++){
-    solver[iMesh] = CSolverFactory::CreateSolverContainer(kindSolver, config, geometry[iMesh], iMesh);
+    try { solver[iMesh] = CSolverFactory::CreateSolverContainer(kindSolver, config, geometry[iMesh], iMesh); }
+    catch (const std::exception& e) {
+      if (kindSolver!=MAIN_SOLVER::PRIMITIVE_EULER) throw;
+      SU2_MPI::Error(e.what(),CURRENT_FUNCTION);
+    }
   }
 
   /*--- Count the number of DOFs per solution point. ---*/

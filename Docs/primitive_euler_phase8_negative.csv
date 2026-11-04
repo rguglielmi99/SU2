@@ -1,0 +1,17 @@
+case,returncode,expected,seconds
+implicit,1,EULER_EXPLICIT,0.23069853000197327
+multigrid,1,multigrid,0.1809265870033414
+dual_time,1,TIME_STEPPING,0.1777910820019315
+unknown_marker,1,marker,0.18479525699513033
+unused_marker,1,marker,0.18724344899965217
+wall,1,supports only,0.18950011300330516
+symmetry,1,supports only,0.18897501500032376
+bad_mode,1,UNIFORM,0.18012347599869827
+bad_representation,1,NODE,0.19020655500207795
+bad_final_time,1,integer multiple,0.17785158200422302
+motion,1,static,0.1854884159984067
+cfl_conflict,1,TIME_STEP=0,0.18094949900114443
+zero_output_frequency,1,must be positive,0.185086051998951
+native_mms,1,KIND_VERIFICATION_SOLUTION,0.18722000600246247
+3d,1,2D,0.17845666100038216
+quadrilateral,1,triang,0.18149345200072275

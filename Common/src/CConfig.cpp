@@ -249,6 +249,40 @@ CConfig::CConfig(char case_filename[MAX_STRING_SIZE], CConfig *config) {
   }
 }
 
+void CConfig::ConfigurePrimitiveDriverTime() {
+  if (Kind_Solver != MAIN_SOLVER::PRIMITIVE_EULER) return;
+  if (!Time_Domain || TimeMarching != TIME_MARCHING::TIME_STEPPING)
+    SU2_MPI::Error("PRIMITIVE_EULER driver requires TIME_DOMAIN=YES and TIME_MARCHING=TIME_STEPPING.", CURRENT_FUNCTION);
+  if (PrimitiveRequestedMGLevels != 0)
+    SU2_MPI::Error("PRIMITIVE_EULER does not support multigrid; use MGLEVEL=0.", CURRENT_FUNCTION);
+  if (Kind_TimeIntScheme_Flow != EULER_EXPLICIT)
+    SU2_MPI::Error("PRIMITIVE_EULER does not support implicit or Runge-Kutta integration; use EULER_EXPLICIT.", CURRENT_FUNCTION);
+  if (nTimeIter == 0 || !std::isfinite(SU2_TYPE::GetValue(Time_Step)) ||
+      !std::isfinite(SU2_TYPE::GetValue(Unst_CFL)) || Unst_CFL < 0)
+    SU2_MPI::Error("PRIMITIVE_EULER requires positive TIME_ITER and finite nonnegative time-step settings.", CURRENT_FUNCTION);
+  if (Unst_CFL > 0) {
+    if (Time_Step != 0 || !OptionIsSet("TIME_ITER"))
+      SU2_MPI::Error("PRIMITIVE_EULER CFL mode requires TIME_STEP=0 and explicit TIME_ITER as a step cap.", CURRENT_FUNCTION);
+    if (!OptionIsSet("MAX_TIME")) Max_Time = std::numeric_limits<passivedouble>::max();
+  } else {
+    if (Time_Step <= 0)
+      SU2_MPI::Error("PRIMITIVE_EULER fixed-step mode requires TIME_STEP>0.", CURRENT_FUNCTION);
+    if (OptionIsSet("MAX_TIME")) {
+      const double count = SU2_TYPE::GetValue(Max_Time/Time_Step);
+      const double integral = std::round(count);
+      if (!std::isfinite(count) || count < 1 || count > static_cast<double>(std::numeric_limits<unsigned long>::max()/2) ||
+          std::abs(count-integral) > 128*std::numeric_limits<double>::epsilon()*std::max(1.0,count))
+        SU2_MPI::Error("PRIMITIVE_EULER fixed MAX_TIME must be a positive integer multiple of TIME_STEP; no hidden step clipping.", CURRENT_FUNCTION);
+      const auto timeSteps = static_cast<unsigned long>(integral);
+      nTimeIter = OptionIsSet("TIME_ITER") ? std::min(nTimeIter,timeSteps) : timeSteps;
+    } else {
+      Max_Time = nTimeIter*Time_Step;
+    }
+  }
+  if (!std::isfinite(SU2_TYPE::GetValue(Max_Time)) || Max_Time <= 0)
+    SU2_MPI::Error("PRIMITIVE_EULER requires finite positive MAX_TIME.", CURRENT_FUNCTION);
+}
+
 SU2_MPI::Comm CConfig::GetMPICommunicator() const {
 
   return SU2_Communicator;
@@ -1117,6 +1151,10 @@ void CConfig::SetConfig_Options() {
   addStringOption("PRIMITIVE_FACE_QUADRATURE", PrimitiveFaceQuadrature, "AGGREGATED");
   addStringOption("PRIMITIVE_VOLUME_QUADRATURE", PrimitiveVolumeQuadrature, "MEAN_COEFF");
   addDoubleArrayOption("PRIMITIVE_INITIAL_STATE", 4, false, PrimitiveInitialState.data());
+  addStringOption("PRIMITIVE_INITIALIZATION", PrimitiveInitialization, "UNIFORM");
+  addStringOption("PRIMITIVE_BOUNDARY_MODE", PrimitiveBoundaryMode, "UNIFORM");
+  addDoubleArrayOption("PRIMITIVE_BOUNDARY_STATE", 4, false, PrimitiveBoundaryState.data());
+  addStringOption("PRIMITIVE_GEOMETRY_AUDIT", PrimitiveGeometryAudit, "");
   /*!\brief MULTIZONE \n DESCRIPTION: Enable multizone mode \ingroup Config*/
   addBoolOption("MULTIZONE", Multizone_Problem, NO);
   /*!\brief PHYSICAL_PROBLEM \n DESCRIPTION: Physical governing equations \n Options: see \link Solver_Map \endlink \n DEFAULT: NONE \ingroup Config*/
@@ -3957,6 +3995,9 @@ void CConfig::SetPostprocessing(SU2_COMPONENT val_software, unsigned short val_i
     }
   }
 
+  // Preserve the raw request for driver validation; API-only tests retain their contract.
+  PrimitiveRequestedMGLevels = nMGLevels;
+
   /*--- Check for unsteady problem ---*/
 
   if ((TimeMarching == TIME_MARCHING::TIME_STEPPING ||
@@ -6386,7 +6427,7 @@ void CConfig::SetOutput(SU2_COMPONENT val_software, unsigned short val_izone) {
     }
     switch (Kind_Solver) {
       case MAIN_SOLVER::PRIMITIVE_EULER:
-        cout << "Primitive Euler 2D: phase 5 Forward Euler solver API; general CLI driver unavailable." << endl;
+        cout << "Primitive Euler 2D: NODE path-conservative solver, native single-zone Forward Euler driver." << endl;
         cout << "Representation: " << PrimitiveRepresentation << ", faces: " << PrimitiveFaceQuadrature
              << ", volume: " << PrimitiveVolumeQuadrature << "." << endl;
         return;

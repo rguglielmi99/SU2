@@ -35,6 +35,7 @@
 #include "../../include/iteration/CFEMFluidIteration.hpp"
 #include "../../include/iteration/CTurboIteration.hpp"
 #include "../../include/iteration/CHeatIteration.hpp"
+#include "../../include/iteration/CPrimitiveEulerIteration.hpp"
 #include "../../include/iteration/CFEAIteration.hpp"
 
 CIteration* CIterationFactory::CreateIteration(MAIN_SOLVER kindSolver, const CConfig* config){
@@ -114,7 +115,7 @@ CIteration* CIterationFactory::CreateIteration(MAIN_SOLVER kindSolver, const CCo
       break;
 
     case MAIN_SOLVER::PRIMITIVE_EULER:
-      SU2_MPI::Error("Primitive Euler general-driver iteration is unavailable (phase 5 uses the solver time API).", CURRENT_FUNCTION);
+      iteration = new CPrimitiveEulerIteration(config);
       break;
     case MAIN_SOLVER::NONE: case MAIN_SOLVER::TEMPLATE_SOLVER: case MAIN_SOLVER::MULTIPHYSICS:
       SU2_MPI::Error("No iteration found for specified solver.", CURRENT_FUNCTION);

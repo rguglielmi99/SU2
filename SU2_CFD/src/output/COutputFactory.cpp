@@ -37,6 +37,7 @@
 #include "../../include/output/CFlowIncOutput.hpp"
 #include "../../include/output/CAdjFlowIncOutput.hpp"
 #include "../../include/output/CHeatOutput.hpp"
+#include "../../include/output/CPrimitiveEulerOutput.hpp"
 #include "../../include/output/CAdjHeatOutput.hpp"
 
 COutput* COutputFactory::CreateOutput(MAIN_SOLVER kindSolver, CConfig* config, int nDim){
@@ -44,6 +45,9 @@ COutput* COutputFactory::CreateOutput(MAIN_SOLVER kindSolver, CConfig* config, i
   COutput* output = nullptr;
 
   switch(kindSolver){
+    case MAIN_SOLVER::PRIMITIVE_EULER:
+      output = new CPrimitiveEulerOutput(config,nDim);
+      break;
     case MAIN_SOLVER::EULER: case MAIN_SOLVER::NAVIER_STOKES: case MAIN_SOLVER::RANS:
       output = new CFlowCompOutput(config, nDim);
       break;

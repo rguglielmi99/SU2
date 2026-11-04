@@ -1,0 +1,11 @@
+kind,family,N,seconds,snapshots,returncode
+uniform,regular,8,1.8044215830013854,3,0
+vortex,regular,8,0.2861791209943476,3,0
+vortex,regular,16,0.7824164329940686,3,0
+vortex,regular,32,4.254594286998326,3,0
+vortex,regular,64,57.75411529499979,3,0
+uniform,jitter,8,0.22953424300067127,3,0
+vortex,jitter,8,0.2315703130007023,3,0
+vortex,jitter,16,0.5092538760000025,3,0
+vortex,jitter,32,4.196905935998075,3,0
+vortex,jitter,64,62.54969575099676,3,0
