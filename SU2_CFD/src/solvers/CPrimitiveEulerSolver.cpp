@@ -166,6 +166,75 @@ CPrimitiveEulerSolver::State CPrimitiveEulerSolver::ReconstructAt(unsigned long 
   return result;
 }
 
+std::vector<std::vector<CPrimitiveEulerSolver::Direction>>
+CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
+  // A same-marker Euler chain represents a smooth polygonal wall. Its
+  // integrated half-face sum is the negative native SU2 vertex normal.
+  // Distinct straight markers retain the explicitly declared phase-9 corners.
+  struct Incident { Direction sum{}, first{}; double measure=0; unsigned count=0; bool bent=false; };
+  std::map<std::pair<unsigned long,unsigned short>,Incident> incident;
+  const double tol=256*std::numeric_limits<double>::epsilon();
+  for (const auto& f:metrics->GetBoundaryFaces()) {
+    const auto kind=config.GetMarker_All_KindBC(f.marker);
+    if (kind!=EULER_WALL && kind!=SYMMETRY_PLANE) continue;
+    auto& a=incident[{f.node,f.marker}];
+    const double length=std::hypot(f.normal[0],f.normal[1]);
+    const Direction unit{{f.normal[0]/length,f.normal[1]/length}};
+    if (a.count && (std::abs(a.first[0]*unit[1]-a.first[1]*unit[0])>tol ||
+                    a.first[0]*unit[0]+a.first[1]*unit[1]<0)) a.bent=true;
+    if (!a.count) a.first=unit;
+    ++a.count; a.measure+=length;
+    for (unsigned d=0;d<2;++d) a.sum[d]+=f.normal[d];
+  }
+  std::vector<unsigned> markerCount(nPoint,0);
+  for (const auto& item:incident) ++markerCount[item.first.first];
+  std::vector<std::vector<Direction>> basis(nPoint);
+  for (const auto& item:incident) {
+    const auto node=item.first.first;
+    const auto& a=item.second;
+    if (a.count>2) throw std::invalid_argument("Primitive slip non-manifold wall vertex");
+    const double length=std::hypot(a.sum[0],a.sum[1]);
+    if (!std::isfinite(length) || length<=tol*a.measure)
+      throw std::invalid_argument("Primitive slip degenerate resultant wall normal");
+    if (a.bent && config.GetMarker_All_KindBC(item.first.second)==SYMMETRY_PLANE)
+      throw std::invalid_argument("Primitive symmetry marker must remain locally straight");
+    if (a.bent && markerCount[node]>1)
+      throw std::invalid_argument("Primitive polygonal wall intersects another slip marker: ambiguous corner");
+    Direction n{{a.sum[0]/length,a.sum[1]/length}};
+    for (const auto& b:basis[node]) {
+      const double dot=n[0]*b[0]+n[1]*b[1];
+      for (unsigned d=0;d<2;++d) n[d]-=dot*b[d];
+    }
+    const double magnitude=std::hypot(n[0],n[1]);
+    if (magnitude>tol && basis[node].size()<2) {
+      for (auto& value:n) value/=magnitude;
+      basis[node].push_back(n);
+    }
+  }
+  return basis;
+}
+
+unsigned long CPrimitiveEulerSolver::ProjectFreestreamWallVelocity() {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (physicalTime!=0 || originalConfig->GetPrimitiveInitialization()!="FREESTREAM")
+    throw std::invalid_argument("Wall initialization projection requires FREESTREAM at time zero");
+  const auto basis=BuildSlipConstraints(*originalConfig);
+  std::vector<bool> wall(nPoint,false);
+  for (const auto& f:metrics->GetBoundaryFaces())
+    if (originalConfig->GetMarker_All_KindBC(f.marker)==EULER_WALL) wall[f.node]=true;
+  unsigned long count=0;
+  for (unsigned long i=0;i<nPoint;++i) if (wall[i]) {
+    auto w=nodes->GetPrimitiveState(i);
+    for (const auto& n:basis[i]) {
+      const double un=w[1]*n[0]+w[2]*n[1];
+      for (unsigned d=0;d<2;++d) w[1+d]-=un*n[d];
+    }
+    nodes->SetPrimitiveState(i,w);
+    ++count;
+  }
+  return count;
+}
+
 CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidual(
     CGeometry* geometry, const CConfig* config, double time, const BoundaryState& boundaryState, const Source& source) {
   PrimitiveEvaluationGuard guard(evaluating);
@@ -179,11 +248,7 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
   if (!geometry || !config || geometry != originalGeometry || config != originalConfig || !std::isfinite(time))
     throw std::invalid_argument("Primitive residual requires original static geometry/configuration and finite time");
   ValidateConfiguration(*config);
-  // Boundary-only nodal constraints. Orthonormal bases also handle vertices
-  // where two independent slip planes meet. No interior gradient is changed.
-  std::vector<std::array<Direction,2>> wallBasis(nPoint);
-  std::vector<unsigned> wallRank(nPoint,0);
-  std::map<std::pair<unsigned long,unsigned short>,Direction> markerNormals;
+  const auto wallBasis=BuildSlipConstraints(*config);
   for (unsigned short marker = 0; marker < geometry->GetnMarker(); ++marker) {
     const auto kind = config->GetMarker_All_KindBC(marker);
     if (kind != CUSTOM_BOUNDARY && kind != FAR_FIELD && kind != EULER_WALL && kind != SYMMETRY_PLANE &&
@@ -194,31 +259,10 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
     if (kind==FAR_FIELD && config->GetPrimitiveBoundaryMode()=="LOCAL_CHARACTERISTIC" && !boundaryState)
       throw std::invalid_argument("Primitive LOCAL_CHARACTERISTIC FAR requires a configured physical exterior-state callback; no prescribed-state fallback");
   }
-  for (const auto& f:metrics->GetBoundaryFaces()) {
-    const auto kind=config->GetMarker_All_KindBC(f.marker);
-    if (kind!=EULER_WALL && kind!=SYMMETRY_PLANE) continue;
-    Direction n=f.normal;
-    const double area=std::hypot(n[0],n[1]);
-    for (auto& x:n) x/=area;
-    const auto inserted=markerNormals.emplace(std::make_pair(f.node,f.marker),n);
-    if (!inserted.second) {
-      const auto& other=inserted.first->second;
-      if (std::abs(other[0]*n[1]-other[1]*n[0])>256*std::numeric_limits<double>::epsilon())
-        throw std::invalid_argument("Primitive slip requires locally straight marker segments: split polygon corners into separate markers; curved-wall nodal normals are not implemented");
-    }
-    const auto w=nodes->GetPrimitiveState(f.node);
+  for (unsigned long i=0;i<nPoint;++i) for (const auto& n:wallBasis[i]) {
+    const auto w=nodes->GetPrimitiveState(i);
     if (std::abs(w[1]*n[0]+w[2]*n[1])>256*std::numeric_limits<double>::epsilon()*std::max(1.,std::hypot(w[1],w[2])))
       throw std::invalid_argument("Primitive slip wall requires compatible initial nodal normal velocity; no hidden state projection");
-    for (unsigned j=0;j<wallRank[f.node];++j) {
-      const auto& b=wallBasis[f.node][j];
-      const double dot=n[0]*b[0]+n[1]*b[1];
-      for (unsigned d=0;d<2;++d) n[d]-=dot*b[d];
-    }
-    const double mag=std::hypot(n[0],n[1]);
-    if (wallRank[f.node]<2 && mag>256*std::numeric_limits<double>::epsilon()) {
-      for (auto& x:n) x/=mag;
-      wallBasis[f.node][wallRank[f.node]++]=n;
-    }
   }
   PrepareReconstruction(*geometry, *config);
   const double gamma = SU2_TYPE::GetValue(config->GetGamma());
@@ -282,8 +326,7 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::EvaluateSpatialResid
   // Scalar equations, interior faces, volume, sources and FE remain untouched.
   for (unsigned long i=0;i<nPoint;++i) {
     const double volume=metrics->GetCell(i).volume;
-    for (unsigned j=0;j<wallRank[i];++j) {
-      const auto& n=wallBasis[i][j];
+    for (const auto& n:wallBasis[i]) {
       const double normalRhs=result.rhs[i][1]*n[0]+result.rhs[i][2]*n[1];
       for (unsigned d=0;d<2;++d) {
         const double correction=normalRhs*n[d];

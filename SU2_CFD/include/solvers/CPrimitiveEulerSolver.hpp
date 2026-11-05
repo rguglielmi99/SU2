@@ -22,6 +22,7 @@ class CPrimitiveEulerSolver final : public CSolver {
   double physicalTime = 0;
   CVariable* GetBaseClassPointerToNodes() override { return nodes.get(); }
   void PrepareReconstruction(CGeometry& geometry, const CConfig& config);
+  std::vector<std::vector<PrimitiveEuler2D::Direction>> BuildSlipConstraints(const CConfig& config) const;
 
  public:
   CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh);
@@ -30,6 +31,8 @@ class CPrimitiveEulerSolver final : public CSolver {
   const PrimitiveEuler2D::CAggregatedGeometry& GetGeometryMetrics() const { return *metrics; }
   static void ValidateConfiguration(const CConfig& config);
   static void EvolutionUnavailable();
+  // Explicit FREESTREAM-only initialization policy; leaves rho, p and interior nodes unchanged.
+  unsigned long ProjectFreestreamWallVelocity();
 
   using State = PrimitiveEuler2D::State;
   using Direction = PrimitiveEuler2D::Direction;

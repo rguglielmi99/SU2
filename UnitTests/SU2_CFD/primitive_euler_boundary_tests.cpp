@@ -201,11 +201,73 @@ TEST_CASE("Rotated channel slip preserves tangential acceleration and mixed-mark
   }
 }
 
-TEST_CASE("Curved slip markers fail explicitly instead of imposing artificial no-slip", "[primitive-boundary]") {
+TEST_CASE("Nonplanar symmetry remains explicitly unsupported", "[primitive-boundary]") {
   const std::vector<Direction> xy{{{0,0}},{{1,0}},{{0,1}}};
-  MeshFixture f(xy,{{{0,1,2}}},"PRIMITIVE_EULER","TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n","MARKER_EULER");
+  MeshFixture f(xy,{{{0,1,2}}},"PRIMITIVE_EULER","TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n","MARKER_SYM");
   CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0);
   for (unsigned i=0;i<3;++i) solver.GetPrimitiveNodes().SetPrimitiveState(i,{{1,0,0,1}});
   try { solver.ComputeSpatialResidual(f.geometry.get(),f.config.get());FAIL("Curved marker accepted"); }
-  catch (const std::invalid_argument& e) { CHECK(std::string(e.what()).find("curved-wall")!=std::string::npos); }
+  catch (const std::invalid_argument& e) { CHECK(std::string(e.what()).find("symmetry marker")!=std::string::npos); }
+}
+
+TEST_CASE("Nonmanifold Euler wall is rejected by geometry before initialization", "[primitive-boundary][primitive-polygon]") {
+  // Two fluid regions touch only at vertex zero: four physical half-faces,
+  // not a single smooth polygonal wall neighbourhood.
+  const std::vector<Direction> xy{{{0,0}},{{1,0}},{{0,1}},{{-1,0}},{{0,-1}}};
+  MeshFixture f(xy,{{{0,1,2}},{{0,3,4}}},"PRIMITIVE_EULER",
+      "TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\nPRIMITIVE_INITIALIZATION=FREESTREAM\n","MARKER_EULER");
+  // The existing geometry audit already rejects this topology: do not bypass
+  // that earlier guard merely to exercise the later wall-incidence guard.
+  try { CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0); FAIL("Nonmanifold wall accepted"); }
+  catch (const std::invalid_argument& e) {
+    CHECK(std::string(e.what()).find("Primitive boundary normal inconsistent with SU2")!=std::string::npos);
+  }
+}
+
+TEST_CASE("Polygonal Euler wall uses one resultant normal and explicit freestream projection", "[primitive-boundary][primitive-polygon]") {
+  const std::vector<Direction> xy{{{0,0}},{{1,.2}},{{2,.3}},{{2,1.3}},{{0,1}},{{.9,.7}}};
+  const std::vector<Triangle> cells{{{0,1,5}},{{1,2,5}},{{2,3,5}},{{3,4,5}},{{4,0,5}}};
+  const std::vector<BoundaryMarker> markers{{"wall",{{{0,1}},{{1,2}}}},
+                                           {"open",{{{2,3}},{{3,4}},{{4,0}}}}};
+  for (bool reverse:{false,true}) {
+    MeshFixture f(xy,cells,"PRIMITIVE_EULER","TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n"
+        "PRIMITIVE_INITIALIZATION=FREESTREAM\nNUM_METHOD_GRAD_RECON=WEIGHTED_LEAST_SQUARES\n"
+        "SLOPE_LIMITER_FLOW=NONE\nMARKER_EULER=(wall)\nMARKER_CUSTOM=(open)\n","",markers,reverse);
+    CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0);
+    const State free{{1,.4,.2,1}};
+    for (unsigned i=0;i<xy.size();++i) solver.GetPrimitiveNodes().SetPrimitiveState(i,free);
+    const CPrimitiveEulerSolver::BoundaryState extrapolate=[](const Direction&,double,const State& w,const Direction&,unsigned short){return w;};
+    CHECK_THROWS_AS(solver.ComputeSpatialResidual(f.geometry.get(),f.config.get(),0,extrapolate),std::invalid_argument);
+    std::vector<Direction> normal(xy.size());
+    for (const auto& face:solver.GetGeometryMetrics().GetBoundaryFaces()) if (face.marker==0)
+      for (unsigned d=0;d<2;++d) normal[face.node][d]+=face.normal[d];
+    CHECK(normal[1][0]==Precise(.15)); CHECK(normal[1][1]==Precise(-1));
+    for (unsigned long v=0;v<f.geometry->GetnVertex(0);++v) {
+      const auto* vertex=f.geometry->vertex[0][v];
+      for (unsigned d=0;d<2;++d) CHECK(normal[vertex->GetNode()][d]==Precise(-vertex->GetNormal(d)));
+    }
+    for (auto& n:normal) { const double length=std::hypot(n[0],n[1]); if (length>0) for (auto& a:n) a/=length; }
+    REQUIRE(solver.ProjectFreestreamWallVelocity()==3);
+    for (unsigned i=0;i<xy.size();++i) {
+      const auto w=solver.GetPrimitiveNodes().GetPrimitiveState(i);
+      CHECK(w[0]==free[0]); CHECK(w[3]==free[3]);
+      if (i>2) Same(w,free);
+      else {
+        const double un=free[1]*normal[i][0]+free[2]*normal[i][1];
+        CHECK(w[1]==Precise(free[1]-un*normal[i][0]));
+        CHECK(w[2]==Precise(free[2]-un*normal[i][1]));
+        CHECK(std::hypot(w[1],w[2])>.3);
+      }
+    }
+    for (unsigned step=0;step<5;++step) {
+      const auto result=solver.AdvanceExplicitEuler(f.geometry.get(),f.config.get(),step*1e-4,1e-4,extrapolate);
+      for (unsigned i=0;i<xy.size();++i) {
+        const auto w=solver.GetPrimitiveNodes().GetPrimitiveState(i);
+        CHECK(w[0]>0); CHECK(w[3]>0);
+        for (auto value:result.rhs[i]) CHECK(std::isfinite(value));
+        if (i<3) CHECK(w[1]*normal[i][0]+w[2]*normal[i][1]==Precise(0));
+      }
+    }
+    CHECK_THROWS_AS(solver.ProjectFreestreamWallVelocity(),std::invalid_argument);
+  }
 }

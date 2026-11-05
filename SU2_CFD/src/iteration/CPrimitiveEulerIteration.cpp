@@ -93,6 +93,9 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
       if (c->GetPrimitiveInitialization()=="FREESTREAM") {
         const auto state=PrimitiveEulerBoundaryConfig::Freestream(*c);
         for (unsigned long i=0;i<g->GetnPoint();++i) s->GetPrimitiveNodes().SetPrimitiveState(i,state);
+        const auto count=s->ProjectFreestreamWallVelocity();
+        std::cout << "PRIMITIVE_EULER FREESTREAM: tangential velocity projection at " << count
+                  << " Euler-wall nodes (density and pressure unchanged)." << std::endl;
       }
       c->SetPhysicalTime(0);
       c->SetDelta_UnstTimeND(c->GetDelta_UnstTime());
