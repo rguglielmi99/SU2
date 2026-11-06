@@ -25,6 +25,176 @@ double Minus(const State& w,const Direction& n) { return Boundary::NormalVelocit
 }
 
 namespace {
+using GlobalFive=std::array<double,5>; // M, Px, Py, E, H; test-only diagnostics.
+GlobalFive GlobalDensity(const State& w) {
+  const double speed2=w[1]*w[1]+w[2]*w[2];
+  return {{w[0],w[0]*w[1],w[0]*w[2],w[3]/.4+.5*w[0]*speed2,
+           w[0]*(std::log(w[3])-1.4*std::log(w[0]))}};
+}
+GlobalFive GlobalChain(const State& w,const State& r) {
+  return {{r[0],w[1]*r[0]+w[0]*r[1],w[2]*r[0]+w[0]*r[2],
+           r[3]/.4+.5*(w[1]*w[1]+w[2]*w[2])*r[0]+w[0]*(w[1]*r[1]+w[2]*r[2]),
+           (std::log(w[3])-1.4*std::log(w[0])-1.4)*r[0]+w[0]*r[3]/w[3]}};
+}
+struct BalanceBox {
+  unsigned n;
+  std::vector<Direction> xy;
+  std::vector<Triangle> cells;
+  std::vector<BoundaryMarker> markers{{"south",{}},{"east",{}},{"north",{}},{"west",{}}};
+  explicit BalanceBox(unsigned count):n(count) {
+    const auto id=[&](unsigned i,unsigned j){return static_cast<unsigned long>(j*(n+1)+i);};
+    for (unsigned j=0;j<=n;++j) for (unsigned i=0;i<=n;++i) xy.push_back({{double(i)/n,double(j)/n}});
+    for (unsigned j=0;j<n;++j) for (unsigned i=0;i<n;++i) {
+      const auto a=id(i,j),b=id(i+1,j),c=id(i+1,j+1),d=id(i,j+1);
+      cells.push_back({{a,b,c}}); cells.push_back({{a,c,d}});
+    }
+    for (unsigned k=0;k<n;++k) {
+      markers[0].edges.push_back({{id(k,0),id(k+1,0)}});
+      markers[1].edges.push_back({{id(n,k),id(n,k+1)}});
+      markers[2].edges.push_back({{id(k+1,n),id(k,n)}});
+      markers[3].edges.push_back({{id(0,k+1),id(0,k)}});
+    }
+  }
+};
+const std::string balanceOptions="TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n"
+    "MUSCL_FLOW=YES\nNUM_METHOD_GRAD_RECON=WEIGHTED_LEAST_SQUARES\nSLOPE_LIMITER_FLOW=NONE\n"
+    "PRIMITIVE_VOLUME_QUADRATURE=NODE_POINT\n";
+State BoxInitial(const Direction& x) {
+  const double pi=std::acos(-1.),cx=std::cos(pi*x[0]),cy=std::cos(pi*x[1]);
+  return {{1+.03*cx*cy,.1*std::sin(pi*x[0])*cy,-.1*cx*std::sin(pi*x[1]),1+.04*cx+.03*cy}};
+}
+struct GlobalBalance {
+  GlobalFive value{},rate{};
+  Direction force{},closure{};
+  double minRho=1e300,minP=1e300,slip=0,maxRhs=0;
+};
+GlobalBalance MeasureGlobal(CPrimitiveEulerSolver& s,const CPrimitiveEulerSolver::SpatialResult& result) {
+  GlobalBalance b;
+  for (unsigned long i=0;i<result.rhs.size();++i) {
+    const auto w=s.GetPrimitiveNodes().GetPrimitiveState(i);
+    REQUIRE(w[0]>0); REQUIRE(w[3]>0);
+    const auto value=GlobalDensity(w),rate=GlobalChain(w,result.rhs[i]);
+    const double volume=s.GetGeometryMetrics().GetCell(i).volume;
+    for (unsigned k=0;k<5;++k) {
+      REQUIRE(std::isfinite(value[k])); REQUIRE(std::isfinite(rate[k]));
+      b.value[k]+=volume*value[k]; b.rate[k]+=volume*rate[k];
+    }
+    for (auto r:result.rhs[i]) b.maxRhs=std::max(b.maxRhs,std::abs(r));
+    b.minRho=std::min(b.minRho,w[0]); b.minP=std::min(b.minP,w[3]);
+  }
+  for (const auto& face:s.GetGeometryMetrics().GetBoundaryFaces()) {
+    const auto trace=s.ReconstructAt(face.node,face.point);
+    const auto w=s.GetPrimitiveNodes().GetPrimitiveState(face.node);
+    const double length=std::hypot(face.normal[0],face.normal[1]);
+    b.slip=std::max(b.slip,std::abs(w[1]*face.normal[0]+w[2]*face.normal[1])/length);
+    for (unsigned d=0;d<2;++d) {
+      b.force[d]+=trace[3]*face.normal[d]; b.closure[d]+=face.normal[d];
+    }
+  }
+  CHECK(b.slip<2e-13);
+  for (auto value:b.closure) CHECK(value==Approx(0).margin(2e-14));
+  return b;
+}
+void PrintGlobal(const char* kind,unsigned n,unsigned step,double time,double dt,const GlobalBalance& b,
+                 const GlobalFive& initial,const GlobalFive& integrated={},const Direction& impulse={}) {
+  std::cout << std::setprecision(17) << "GLOBAL_BALANCE," << kind << ',' << n << ',' << step << ',' << time << ',' << dt;
+  for (auto value:b.value) std::cout << ',' << value;
+  for (auto value:b.rate) std::cout << ',' << value;
+  std::cout << ',' << b.force[0] << ',' << b.force[1] << ',' << (b.value[0]-initial[0])/initial[0]
+            << ',' << (b.value[3]-initial[3])/initial[3] << ',' << b.value[4]-initial[4]
+            << ',' << b.value[1]-initial[1]+impulse[0] << ',' << b.value[2]-initial[2]+impulse[1]
+            << ',' << impulse[0] << ',' << impulse[1];
+  for (auto value:integrated) std::cout << ',' << value;
+  for (unsigned k=0;k<5;++k) std::cout << ',' << b.value[k]-initial[k]-integrated[k];
+  std::cout << ',' << b.minRho << ',' << b.minP << ',' << b.slip << ',' << b.maxRhs << '\n';
+}
+}
+
+TEST_CASE("Global balance chain diagnostics agree with independent directional derivatives", "[primitive-global-balance]") {
+  const State w{{1.13,.27,-.18,1.21}},direction{{.07,-.11,.13,-.09}};
+  const auto rate=GlobalChain(w,direction);
+  for (double epsilon:{1e-4,1e-5}) {
+    auto plus=w,minus=w;
+    for (unsigned k=0;k<4;++k) { plus[k]+=epsilon*direction[k]; minus[k]-=epsilon*direction[k]; }
+    const auto a=GlobalDensity(plus),b=GlobalDensity(minus);
+    for (unsigned k=0;k<5;++k) CHECK(rate[k]==Approx((a[k]-b[k])/(2*epsilon)).epsilon(2e-8).margin(5e-11));
+  }
+}
+
+TEST_CASE("Closed square measures equilibrium and nonuniform semidiscrete physical balances", "[primitive-global-balance]") {
+  std::cout << "GLOBAL_BALANCE,kind,N,step,time,dt,M,Px,Py,E,H,dM,dPx,dPy,dE,dH,Fx,Fy,M_relative,E_relative,H_delta,Px_impulse_defect,Py_impulse_defect,impulse_x,impulse_y,int_dM,int_dPx,int_dPy,int_dE,int_dH,time_M,time_Px,time_Py,time_E,time_H,min_rho,min_p,slip,max_rhs\n";
+  for (unsigned n:{8u,16u,32u}) {
+    BalanceBox grid(n);
+    MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",balanceOptions,"MARKER_EULER",grid.markers);
+    CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0);
+    if (n==8) {
+      for (unsigned long i=0;i<grid.xy.size();++i) s.GetPrimitiveNodes().SetPrimitiveState(i,{{1,0,0,1}});
+      const auto r=s.ComputeSpatialResidual(f.geometry.get(),f.config.get());
+      const auto quiet=MeasureGlobal(s,r);
+      CHECK(quiet.maxRhs<2e-13); CHECK(quiet.value[0]==Precise(1)); CHECK(quiet.value[3]==Precise(2.5));
+      for (auto rate:quiet.rate) CHECK(rate==Approx(0).margin(2e-13));
+      PrintGlobal("quiet",n,0,0,0,quiet,quiet.value);
+      for (unsigned step=0;step<5;++step) s.AdvanceExplicitEuler(f.geometry.get(),f.config.get(),step*.001,.001);
+      const auto rFinal=s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),.005);
+      const auto final=MeasureGlobal(s,rFinal);
+      for (unsigned k=0;k<5;++k) CHECK(final.value[k]==Approx(quiet.value[k]).margin(2e-13));
+      PrintGlobal("quiet_final",n,5,.005,.001,final,quiet.value);
+    }
+    // Direct API diagnostic at t=0, independent of the quiet evolution clock.
+    CPrimitiveEulerSolver nonuniform(f.geometry.get(),f.config.get(),0);
+    for (unsigned long i=0;i<grid.xy.size();++i) nonuniform.GetPrimitiveNodes().SetPrimitiveState(i,BoxInitial(grid.xy[i]));
+    const auto r=nonuniform.ComputeSpatialResidual(f.geometry.get(),f.config.get());
+    const auto b=MeasureGlobal(nonuniform,r);
+    // Analytic pressure at the same quadrature points distinguishes force
+    // quadrature from reconstruction and from the semidiscrete momentum defect.
+    Direction analyticForce{};
+    for (const auto& face:nonuniform.GetGeometryMetrics().GetBoundaryFaces())
+      for (unsigned d=0;d<2;++d) analyticForce[d]+=BoxInitial(face.point)[3]*face.normal[d];
+    CHECK(analyticForce[0]==Precise(-.08)); CHECK(analyticForce[1]==Precise(-.06));
+    PrintGlobal("initial",n,0,0,0,b,b.value);
+  }
+}
+
+TEST_CASE("Closed square separates semidiscrete balance from nonlinear Forward Euler drift", "[primitive-global-balance]") {
+  for (unsigned n:{8u,16u,32u}) for (unsigned divisor:{1u,2u}) {
+    if (divisor==2 && n!=16) continue;
+    BalanceBox grid(n);
+    MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",balanceOptions,"MARKER_EULER",grid.markers);
+    CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0);
+    for (unsigned long i=0;i<grid.xy.size();++i) s.GetPrimitiveNodes().SetPrimitiveState(i,BoxInitial(grid.xy[i]));
+    const unsigned steps=divisor*static_cast<unsigned>(std::ceil(.05/s.EstimateTimeStep(f.geometry.get(),f.config.get(),0,.1)));
+    const double dt=.05/steps;
+    GlobalFive initial{},integrated{}; Direction impulse{};
+    for (unsigned step=0;step<=steps;++step) {
+      const auto r=s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),step*dt);
+      const auto b=MeasureGlobal(s,r);
+      if (step==0) initial=b.value;
+      if (step==0 || step==steps/2 || step==steps)
+        PrintGlobal(divisor==1?"evolve":"half_dt",n,step,step*dt,dt,b,initial,integrated,impulse);
+      if (step==steps) break;
+      // Independent exact FE polynomial remainders for momentum and energy.
+      GlobalFive predicted{};
+      for (unsigned long i=0;i<grid.xy.size();++i) {
+        const auto w=s.GetPrimitiveNodes().GetPrimitiveState(i); const auto& d=r.rhs[i];
+        const double volume=s.GetGeometryMetrics().GetCell(i).volume;
+        predicted[1]+=volume*dt*dt*d[0]*d[1]; predicted[2]+=volume*dt*dt*d[0]*d[2];
+        predicted[3]+=volume*(dt*dt*(.5*w[0]*(d[1]*d[1]+d[2]*d[2])+d[0]*(w[1]*d[1]+w[2]*d[2]))+
+                              .5*dt*dt*dt*d[0]*(d[1]*d[1]+d[2]*d[2]));
+      }
+      s.AdvanceExplicitEuler(f.geometry.get(),f.config.get(),step*dt,dt);
+      GlobalFive after{};
+      for (unsigned long i=0;i<grid.xy.size();++i) {
+        const auto q=GlobalDensity(s.GetPrimitiveNodes().GetPrimitiveState(i));
+        for (unsigned k=0;k<5;++k) after[k]+=s.GetGeometryMetrics().GetCell(i).volume*q[k];
+      }
+      for (unsigned k=0;k<4;++k) CHECK(after[k]-b.value[k]-dt*b.rate[k]==Approx(predicted[k]).margin(2e-12));
+      for (unsigned k=0;k<5;++k) integrated[k]+=dt*b.rate[k];
+      for (unsigned d=0;d<2;++d) impulse[d]+=dt*b.force[d];
+    }
+  }
+}
+
+namespace {
 // Phase 11: uniformly refine a hexagonal fan; only new boundary vertices
 // are projected onto the circle. No manufactured forcing or boundary callback.
 struct RotatingDisk {
