@@ -1,0 +1,14 @@
+{
+  "source": "/Users/riccardoguglielmi/SU2/TestCases/primitive_euler_examples/naca0012_aoa0/results/native/native_state_000599.dat",
+  "source_sha256": "cbb014b7a30800f338b690daa8388bf603c4d551ac9a862d554f0cefe3603857",
+  "mesh_sha256": "9094b51c2628d3bb4c865d774b2308dbb59a213ad19c007cfcd7d57e7aaeebeb",
+  "nodes": 5233,
+  "gamma": 1.4,
+  "coordinate_max_error": 0.0,
+  "inverse_max_error": 8.881784197001252e-16,
+  "min_rho": 0.9821589325435973,
+  "min_p": 0.9884186823099795,
+  "identity": "implicit binary GlobalIndex verified against explicit mesh IDs",
+  "projection": "none in converter; explicit solver initialization projection is measured separately",
+  "native_config_sha256": "d9e2e4a03ee837d0853c6326d258cdc39bd1ff801b8ec2d165071f1f15054042"
+}

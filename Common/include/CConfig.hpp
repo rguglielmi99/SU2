@@ -516,6 +516,10 @@ private:
   std::string PrimitiveBoundaryMode = "UNIFORM";
   std::array<su2double, 4> PrimitiveBoundaryState{{1.0, 0.5, 0.3, 1.0}};
   std::string PrimitiveGeometryAudit;
+  long PrimitiveWeakTEGlobalID = -1;  // Explicit opt-in; negative sentinel is never a mesh ID.
+  std::string PrimitiveTEPolicy = "WEAK";
+  std::string PrimitiveInitialFile;
+  bool PrimitiveLocalPseudoTime = false;
   unsigned short PrimitiveRequestedMGLevels = 0;
   LIMITER Kind_SlopeLimit,      /*!< \brief Slope limiter (for the runtime eq. system). */
   Kind_SlopeLimit_Flow,         /*!< \brief Slope limiter for flow equations.*/
@@ -3928,6 +3932,10 @@ public:
   const std::string& GetPrimitiveBoundaryMode() const { return PrimitiveBoundaryMode; }
   const std::array<su2double, 4>& GetPrimitiveBoundaryState() const { return PrimitiveBoundaryState; }
   const std::string& GetPrimitiveGeometryAudit() const { return PrimitiveGeometryAudit; }
+  long GetPrimitiveWeakTEGlobalID() const { return PrimitiveWeakTEGlobalID; }
+  const std::string& GetPrimitiveTEPolicy() const { return PrimitiveTEPolicy; }
+  const std::string& GetPrimitiveInitialFile() const { return PrimitiveInitialFile; }
+  bool GetPrimitiveLocalPseudoTime() const { return PrimitiveLocalPseudoTime; }
   void ConfigurePrimitiveDriverTime();
 
   /*!

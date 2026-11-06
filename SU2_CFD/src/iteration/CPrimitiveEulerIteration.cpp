@@ -15,6 +15,10 @@ void CPrimitiveEulerIteration::ValidateDriver(const CConfig& c) {
   if (SU2_MPI::GetSize()!=1 || omp_get_max_threads()!=1)
     throw std::invalid_argument("PRIMITIVE_EULER supports only serial mode: one MPI rank and one OpenMP thread.");
   CPrimitiveEulerSolver::ValidateConfiguration(c);
+  if (c.GetPrimitiveLocalPseudoTime() &&
+      (c.GetPrimitiveInitialization()=="ISENTROPIC_VORTEX" || c.GetPrimitiveBoundaryMode()=="ISENTROPIC_VORTEX" ||
+       c.GetDelta_UnstTime()!=0 || c.GetUnst_CFL()!=0 || c.OptionIsSet("MAX_TIME") || c.GetCFL(MESH_0)<=0))
+    throw std::invalid_argument("Local primitive pseudo-time requires autonomous BCs, CFL_NUMBER>0, TIME_STEP=0, UNST_CFL_NUMBER=0 and no MAX_TIME");
   if (c.GetSystemMeasurements()!=SI)
     throw std::invalid_argument("PRIMITIVE_EULER physical boundary adapter currently requires SYSTEM_MEASUREMENTS=SI");
   if (c.GetnMarker_Periodic()!=0)
@@ -41,9 +45,11 @@ void CPrimitiveEulerIteration::ValidateDriver(const CConfig& c) {
       throw std::invalid_argument(std::string("PRIMITIVE_EULER does not use native conservative flux option ")+option);
   const auto& initial=c.GetPrimitiveInitialization();
   const auto& boundary=c.GetPrimitiveBoundaryMode();
-  if ((initial!="UNIFORM" && initial!="FREESTREAM" && initial!="ISENTROPIC_VORTEX") ||
+  if ((initial!="UNIFORM" && initial!="FREESTREAM" && initial!="FILE" && initial!="ISENTROPIC_VORTEX") ||
       (boundary!="UNIFORM" && boundary!="ISENTROPIC_VORTEX" && boundary!="LOCAL_CHARACTERISTIC"))
-    throw std::invalid_argument("PRIMITIVE_INITIALIZATION supports UNIFORM, FREESTREAM or ISENTROPIC_VORTEX; boundary mode supports UNIFORM, ISENTROPIC_VORTEX or LOCAL_CHARACTERISTIC.");
+    throw std::invalid_argument("Unsupported primitive initialization/boundary mode.");
+  if (initial=="FILE" && c.GetPrimitiveInitialFile().empty())
+    throw std::invalid_argument("FILE initialization requires PRIMITIVE_INITIAL_FILE");
   if ((initial=="ISENTROPIC_VORTEX") != (boundary=="ISENTROPIC_VORTEX"))
     throw std::invalid_argument("The vortex benchmark requires matching analytic initialization and exterior boundary mode.");
   if (initial=="ISENTROPIC_VORTEX" && std::abs(SU2_TYPE::GetValue(c.GetGamma())-1.4)>1e-14)
@@ -93,11 +99,19 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
       if (c->GetPrimitiveInitialization()=="FREESTREAM") {
         const auto state=PrimitiveEulerBoundaryConfig::Freestream(*c);
         for (unsigned long i=0;i<g->GetnPoint();++i) s->GetPrimitiveNodes().SetPrimitiveState(i,state);
-        const auto count=s->ProjectFreestreamWallVelocity();
+        const auto count=s->ProjectInitialWallVelocity();
         std::cout << "PRIMITIVE_EULER FREESTREAM: tangential velocity projection at " << count
                   << " Euler-wall nodes (density and pressure unchanged)." << std::endl;
       }
+      if (c->GetPrimitiveInitialization()=="FILE") {
+        s->InitializePrimitiveFile(c->GetPrimitiveInitialFile());
+        const auto count=s->ProjectInitialWallVelocity();
+        std::cout << "PRIMITIVE_EULER FILE: explicit initial tangential velocity projection at " << count
+                  << " wall nodes; rho/p unchanged. TE policy=" << c->GetPrimitiveTEPolicy() << std::endl;
+      }
       c->SetPhysicalTime(0);
+      if (c->GetPrimitiveLocalPseudoTime())
+        std::cout << "PRIMITIVE_EULER: stationary LOCAL PSEUDO-TIME; Time_Iter is an iteration index, no physical clock advances." << std::endl;
       c->SetDelta_UnstTimeND(c->GetDelta_UnstTime());
       output->SetHistoryOutput(g,container,c,0,0,0);
       output->SetResultFiles(g,c,container,0,true);
@@ -109,14 +123,18 @@ void CPrimitiveEulerIteration::Solve(COutput* output, CIntegration****, CGeometr
         const CPrimitiveEulerSolver::State& inside,const CPrimitiveEulerSolver::Direction& n,unsigned short marker) {
       return PrimitiveEulerBoundaryConfig::Evaluate(*c,marker,q,t,inside,n);
     };
-    double dt=SU2_TYPE::GetValue(c->GetDelta_UnstTime());
-    if (c->GetUnst_CFL()>0) {
-      dt=s->EstimateTimeStep(g,c,time,SU2_TYPE::GetValue(c->GetUnst_CFL()),boundary);
-      dt=std::min(dt,SU2_TYPE::GetValue(c->GetMax_Time())-time);
+    if (c->GetPrimitiveLocalPseudoTime()) {
+      s->AdvanceLocalPseudoTime(g,c,SU2_TYPE::GetValue(c->GetCFL(MESH_0)),boundary);
+      c->SetDelta_UnstTimeND(0);  // No common physical time increment exists.
+    } else {
+      double dt=SU2_TYPE::GetValue(c->GetDelta_UnstTime());
+      if (c->GetUnst_CFL()>0) {
+        dt=s->EstimateTimeStep(g,c,time,SU2_TYPE::GetValue(c->GetUnst_CFL()),boundary);
+        dt=std::min(dt,SU2_TYPE::GetValue(c->GetMax_Time())-time);
+      }
+      s->AdvanceExplicitEuler(g,c,time,dt,boundary);
+      c->SetDelta_UnstTimeND(dt);
     }
-    // Single source of truth: no generic residual/BC/integration route runs here.
-    s->AdvanceExplicitEuler(g,c,time,dt,boundary);
-    c->SetDelta_UnstTimeND(dt);
     c->SetPhysicalTime(s->GetPhysicalTime());
     c->SetTimeIter(c->GetTimeIter()+1);  // Output index counts accepted steps; zero belongs to the initial state.
     c->SetInnerIter(0);

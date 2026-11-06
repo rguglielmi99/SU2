@@ -29,6 +29,7 @@
 #include "../../include/solvers/CSolverFactory.hpp"
 #include "../../include/solvers/CEulerSolver.hpp"
 #include "../../include/solvers/CPrimitiveEulerSolver.hpp"
+#include "../../include/iteration/primitive_euler_weak_te_config.hpp"
 #include "../../include/solvers/CIncEulerSolver.hpp"
 #include "../../include/solvers/CNSSolver.hpp"
 #include "../../include/solvers/CIncNSSolver.hpp"
@@ -332,7 +333,8 @@ CSolver* CSolverFactory::CreateSubSolver(SUB_SOLVER_TYPE kindSolver, CSolver **s
       metaData.integrationType = INTEGRATION_TYPE::SINGLEGRID;
       break;
     case SUB_SOLVER_TYPE::PRIMITIVE_EULER:
-      primitiveOwner.reset(new CPrimitiveEulerSolver(geometry, config, iMGLevel));
+      primitiveOwner.reset(new CPrimitiveEulerSolver(geometry, config, iMGLevel,
+          PrimitiveEulerWeakTEConfig::LocalNodes(*geometry,*config)));
       genericSolver = primitiveOwner.get();
       // The primitive CIteration calls the existing transactional FE API once.
       // Generic integration would assemble conservative BC/source routes again.

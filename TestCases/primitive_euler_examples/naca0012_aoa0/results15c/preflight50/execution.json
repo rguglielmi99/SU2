@@ -1,0 +1,8 @@
+{
+  "cfl": 0.05,
+  "requested_iterations": 50,
+  "seconds": 4.541769887990085,
+  "returncode": 0,
+  "stop_reason": "iteration_cap",
+  "initial_state": "freestream"
+}

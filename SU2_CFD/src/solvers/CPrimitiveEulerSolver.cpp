@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <fstream>
 
 namespace {
 struct PrimitiveEvaluationGuard {
@@ -310,7 +311,12 @@ CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
     const double length=std::hypot(a.sum[0],a.sum[1]);
     if (!std::isfinite(length) || length<=tol*a.measure)
       throw std::invalid_argument("Primitive slip degenerate resultant wall normal");
-    if (weakTrailingEdge[node]) continue; // Validated explicit opt-in: retain only weak face BCs.
+    if (weakTrailingEdge[node]) {
+      // Only a topologically validated, explicitly selected TE can use this policy.
+      if (config.GetPrimitiveTEPolicy()=="PROJECTED")
+        basis[node].push_back({{a.sum[0]/length,a.sum[1]/length}});
+      continue;
+    }
     if (a.opposed && config.GetMarker_All_KindBC(item.first.second)==EULER_WALL)
       throw std::invalid_argument("Primitive Euler wall fold/trailing edge at node "+std::to_string(node)+
           ": non-cooriented half-face normals are outside the supported smooth-wall averaging model; corner/TE topology requires explicit treatment");
@@ -341,15 +347,22 @@ CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
 }
 
 unsigned long CPrimitiveEulerSolver::ProjectFreestreamWallVelocity() {
+  if (originalConfig->GetPrimitiveInitialization()!="FREESTREAM")
+    throw std::invalid_argument("Freestream projection requires FREESTREAM initialization");
+  return ProjectInitialWallVelocity();
+}
+
+unsigned long CPrimitiveEulerSolver::ProjectInitialWallVelocity() {
   PrimitiveEvaluationGuard guard(evaluating);
-  if (physicalTime!=0 || originalConfig->GetPrimitiveInitialization()!="FREESTREAM")
-    throw std::invalid_argument("Wall initialization projection requires FREESTREAM at time zero");
+  if (physicalTime!=0 || pseudoDiagnostics.accepted!=0 ||
+      (originalConfig->GetPrimitiveInitialization()!="FREESTREAM" && originalConfig->GetPrimitiveInitialization()!="FILE"))
+    throw std::invalid_argument("Wall initialization projection requires FREESTREAM/FILE before evolution");
   const auto basis=BuildSlipConstraints(*originalConfig);
   std::vector<bool> wall(nPoint,false);
   for (const auto& f:metrics->GetBoundaryFaces())
     if (originalConfig->GetMarker_All_KindBC(f.marker)==EULER_WALL) wall[f.node]=true;
   unsigned long count=0;
-  for (unsigned long i=0;i<nPoint;++i) if (wall[i] && !weakTrailingEdge[i]) {
+  for (unsigned long i=0;i<nPoint;++i) if (wall[i] && !basis[i].empty()) {
     auto w=nodes->GetPrimitiveState(i);
     for (const auto& n:basis[i]) {
       const double un=w[1]*n[0]+w[2]*n[1];
@@ -359,6 +372,51 @@ unsigned long CPrimitiveEulerSolver::ProjectFreestreamWallVelocity() {
     ++count;
   }
   return count;
+}
+
+void CPrimitiveEulerSolver::InitializePrimitiveFile(const std::string& filename) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (filename.size()>=100)
+    throw std::invalid_argument("Native SU2 reader requires an initialization filename shorter than 100 characters; use a relative path");
+  if (physicalTime!=0 || pseudoDiagnostics.accepted!=0 || SU2_MPI::GetSize()!=1 ||
+      originalConfig->GetPrimitiveInitialization()!="FILE")
+    throw std::invalid_argument("Primitive FILE initialization is serial and precedes evolution");
+  // Reject mesh-size mismatch BEFORE the native reader can interpolate it.
+  std::ifstream input(filename,std::ios::binary);
+  std::array<int,5> header{};
+  input.read(reinterpret_cast<char*>(header.data()),sizeof(header));
+  if (!input || header[0]!=535532 || header[1]!=7 || header[2]!=static_cast<int>(nPoint))
+    throw std::invalid_argument("Primitive FILE binary header/mesh size mismatch; interpolation forbidden");
+  input.seekg(0,std::ios::end);
+  if (input.tellg()<static_cast<std::streamoff>(sizeof(header)+33*7+sizeof(double)*7*nPoint))
+    throw std::invalid_argument("Primitive FILE truncated binary payload");
+  input.close();
+  Read_SU2_Restart_Binary(const_cast<CGeometry*>(originalGeometry),originalConfig,filename);
+  // The MPI native reader quotes field names; the serial reader does not.
+  for (auto& name:fields)
+    if (name.size()>=2 && name.front()=='"' && name.back()=='"') name=name.substr(1,name.size()-2);
+  const std::vector<std::string> expected{"Point_ID","x","y","Density","Velocity_x","Velocity_y","Pressure","GlobalIndex"};
+  if (fields!=expected || Restart_Vars.at(1)!=7 || Restart_Vars.at(2)!=static_cast<int>(nPoint) ||
+      nPoint!=originalGeometry->GetnPointDomain() || Restart_Data.size()!=7*nPoint)
+    throw std::invalid_argument("Primitive FILE requires complete same-mesh x,y,rho,u,v,p,GlobalIndex binary data");
+  std::vector<State> states(nPoint);
+  std::vector<bool> seen(nPoint,false);
+  for (unsigned long i=0;i<nPoint;++i) {
+    const auto global=originalGeometry->nodes->GetGlobalIndex(i);
+    if (global>=nPoint || seen[global]) throw std::invalid_argument("Primitive FILE duplicate/out-of-range global ID");
+    seen[global]=true;
+    const auto* row=&Restart_Data[7*global];
+    if (row[6]!=static_cast<double>(global)) throw std::invalid_argument("Primitive FILE global ID mismatch");
+    for (unsigned d=0;d<2;++d) {
+      const double x=SU2_TYPE::GetValue(originalGeometry->nodes->GetCoord(i,d));
+      if (!std::isfinite(row[d]) || std::abs(row[d]-x)>1e-12*std::max(1.,std::abs(x)))
+        throw std::invalid_argument("Primitive FILE mesh coordinates mismatch");
+    }
+    states[i]={{row[2],row[3],row[4],row[5]}};
+    PrimitiveEuler2D::Validate(states[i],SU2_TYPE::GetValue(originalConfig->GetGamma()));
+  }
+  for (unsigned long i=0;i<nPoint;++i) nodes->SetPrimitiveState(i,states[i]);
+  Restart_Data.clear();
 }
 
 CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::ComputeSpatialResidual(
@@ -508,6 +566,90 @@ CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::AdvanceExplicitEuler
   CommitSpatialResidual(result);
   physicalTime = time + dt;
   return result;
+}
+
+CPrimitiveEulerSolver::SpatialResult CPrimitiveEulerSolver::AdvanceLocalPseudoTime(
+    CGeometry* geometry, const CConfig* config, double cfl, const BoundaryState& boundary,
+    const Source& source, unsigned maxReductions, const std::vector<double>& prescribedSteps) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (!std::isfinite(cfl) || cfl<=0 || maxReductions>32 || physicalTime!=0 ||
+      (!prescribedSteps.empty() && prescribedSteps.size()!=nPoint))
+    throw std::invalid_argument("Invalid autonomous primitive pseudo-time request");
+  // Deep copies of all work arrays modified by reconstruction. LinSysRes and
+  // Solution_Old are untouched until acceptance, including on callback failure.
+  const auto raw=nodes->GetGradient_Reconstruction();
+  const auto limiter=nodes->GetLimiter();
+  C3DDoubleMatrix rmatrix;
+  const bool hasRmatrix=nodes->GetRmatrix().length()!=0;
+  if (hasRmatrix) rmatrix=nodes->GetRmatrix();
+  const auto limited=limitedGradient;
+  const auto positivity=positivityScale;
+  std::vector<State> before(nPoint),candidate(nPoint);
+  for (unsigned long i=0;i<nPoint;++i) before[i]=nodes->GetPrimitiveState(i);
+  const auto restoreState=[&]() {
+    // Direct assignment also restores deliberately invalid input states on error.
+    for (unsigned long i=0;i<nPoint;++i) for (unsigned k=0;k<4;++k) nodes->GetSolution(i)[k]=before[i][k];
+  };
+  unsigned rejected=0;
+  try {
+    const auto base=EvaluateSpatialResidual(geometry,config,0,boundary,source,false);
+    std::vector<double> steps(nPoint);
+    for (unsigned long i=0;i<nPoint;++i) {
+      const double volume=metrics->GetCell(i).volume, radius=base.spectralRadius[i];
+      if (!std::isfinite(volume) || volume<=0 || !std::isfinite(radius) || radius<=0)
+        throw std::invalid_argument("Invalid local primitive volume or spectral denominator");
+      steps[i]=prescribedSteps.empty()?cfl*(volume/radius):prescribedSteps[i];
+      if (!std::isfinite(steps[i]) || steps[i]<=0)
+        throw std::invalid_argument("Invalid local primitive pseudo-time step");
+    }
+    for (unsigned attempt=0;attempt<=maxReductions;++attempt) {
+      const double scale=std::ldexp(1.0,-static_cast<int>(attempt));
+      bool admissible=true;
+      for (unsigned long i=0;i<nPoint;++i) {
+        candidate[i]=before[i];
+        const double step=scale*steps[i];
+        if (!std::isfinite(step) || step<=0) { admissible=false; break; }
+        for (unsigned k=0;k<4;++k) candidate[i][k]+=step*base.rhs[i][k];
+        try { PrimitiveEuler2D::Validate(candidate[i],SU2_TYPE::GetValue(config->GetGamma())); }
+        catch (const std::invalid_argument&) { admissible=false; break; }
+      }
+      if (admissible) {
+        for (unsigned long i=0;i<nPoint;++i) nodes->SetPrimitiveState(i,candidate[i]);
+        SpatialResult current;
+        try {
+          // Checks slip and reconstruction on the complete candidate. This RHS
+          // is diagnostic only; it NEVER participates in the synchronous update.
+          current=EvaluateSpatialResidual(geometry,config,0,boundary,source,false);
+        } catch (const std::invalid_argument&) { admissible=false; }
+        catch (const std::domain_error&) { admissible=false; }
+        if (admissible) {
+          auto info=pseudoDiagnostics;
+          info.steps=steps;
+          for (auto& step:info.steps) step*=scale;
+          info.minimum=*std::min_element(info.steps.begin(),info.steps.end());
+          info.maximum=*std::max_element(info.steps.begin(),info.steps.end());
+          info.ratio=info.maximum/info.minimum; info.effectiveCfl=scale*cfl;
+          if (!std::isfinite(info.ratio) || !std::isfinite(info.effectiveCfl) || info.effectiveCfl<=0)
+            throw std::invalid_argument("Unrepresentable local primitive pseudo-time diagnostics");
+          info.reductions=attempt; ++info.accepted; info.rejectedAttempts+=rejected;
+          restoreState(); nodes->Set_OldSolution();
+          for (unsigned long i=0;i<nPoint;++i) nodes->SetPrimitiveState(i,candidate[i]);
+          CommitSpatialResidual(current);
+          pseudoDiagnostics=std::move(info);
+          return current;
+        }
+      }
+      restoreState(); ++rejected;
+    }
+    throw std::domain_error("Primitive local pseudo-time rejected all candidates after bounded CFL reductions");
+  } catch (...) {
+    restoreState();
+    nodes->GetGradient_Reconstruction()=raw; nodes->GetLimiter()=limiter;
+    if (hasRmatrix) nodes->GetRmatrix()=rmatrix;
+    limitedGradient=limited; positivityScale=positivity;
+    ++pseudoDiagnostics.rejectedIterations; pseudoDiagnostics.rejectedAttempts+=rejected;
+    throw;
+  }
 }
 
 void CPrimitiveEulerSolver::SetTime_Step(CGeometry* geometry, CSolver**, CConfig* config,

@@ -1,0 +1,5 @@
+{
+  "max_state_difference": 0.0,
+  "steps": 5,
+  "baseline": "/Users/riccardoguglielmi/SU2/TestCases/primitive_euler_examples/naca0012_aoa0/results/smoke_primitive"
+}

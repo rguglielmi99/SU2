@@ -1,0 +1,10 @@
+{
+  "label": "pilot_native_PROJECTED",
+  "initial": "native",
+  "policy": "PROJECTED",
+  "cfl": 0.05,
+  "requested_steps": 300,
+  "seconds": 10.224907857002108,
+  "returncode": 0,
+  "stop_reason": "iteration_cap"
+}

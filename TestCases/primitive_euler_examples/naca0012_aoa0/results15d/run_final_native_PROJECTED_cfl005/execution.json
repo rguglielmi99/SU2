@@ -1,0 +1,10 @@
+{
+  "label": "final_native_PROJECTED_cfl005",
+  "initial": "native",
+  "policy": "PROJECTED",
+  "cfl": 0.05,
+  "requested_steps": 9000,
+  "seconds": 312.7093998039927,
+  "returncode": 0,
+  "stop_reason": "iteration_cap"
+}

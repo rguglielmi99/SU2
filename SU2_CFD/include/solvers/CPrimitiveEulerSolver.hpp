@@ -21,6 +21,15 @@ class CPrimitiveEulerSolver final : public CSolver {
   const CConfig* originalConfig;
   std::atomic_flag evaluating = ATOMIC_FLAG_INIT;
   double physicalTime = 0;
+ public:
+  struct PseudoDiagnostics {
+    std::vector<double> steps;
+    double minimum=0, maximum=0, ratio=0, effectiveCfl=0;
+    unsigned reductions=0;
+    unsigned long accepted=0, rejectedIterations=0, rejectedAttempts=0;
+  };
+ private:
+  PseudoDiagnostics pseudoDiagnostics;
   CVariable* GetBaseClassPointerToNodes() override { return nodes.get(); }
   void PrepareReconstruction(CGeometry& geometry, const CConfig& config);
   double SlipFluidAngle(unsigned long node) const;
@@ -29,7 +38,7 @@ class CPrimitiveEulerSolver final : public CSolver {
 
  public:
   // Experimental per-instance opt-in, LOCAL IDs in the original static geometry.
-  // Empty by default; no driver/config activation. Only validated two-branch TEs.
+  // Empty by default; driver resolves only explicit global-ID opt-in. Validated two-branch TEs.
   CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh,
                         const std::vector<unsigned long>& weakTrailingEdgeNodes = {});
   CPrimitiveEulerVariable& GetPrimitiveNodes() { return *nodes; }
@@ -39,6 +48,10 @@ class CPrimitiveEulerSolver final : public CSolver {
   static void EvolutionUnavailable();
   // Explicit FREESTREAM-only initialization policy; leaves rho, p and interior nodes unchanged.
   unsigned long ProjectFreestreamWallVelocity();
+  // Explicit initialization only, also for FILE; rho/p stay fixed. No step-time projection.
+  unsigned long ProjectInitialWallVelocity();
+  // Native binary reader, strict schema/IDs/coordinates; not a time/restart continuation.
+  void InitializePrimitiveFile(const std::string& filename);
 
   using State = PrimitiveEuler2D::State;
   using Direction = PrimitiveEuler2D::Direction;
@@ -78,6 +91,12 @@ class CPrimitiveEulerSolver final : public CSolver {
   // no component clipping, hidden dt reduction or source rescaling.
   SpatialResult AdvanceExplicitEuler(CGeometry*, const CConfig*, double time, double dt,
                                     const BoundaryState& boundary = {}, const Source& source = {});
+  // Autonomous steady iteration: callbacks at t=0, physicalTime must remain zero.
+  // Prescribed steps are an API-only verification hook; driver uses CFL*V/spectralRadius.
+  SpatialResult AdvanceLocalPseudoTime(CGeometry*, const CConfig*, double cfl,
+      const BoundaryState& boundary = {}, const Source& source = {}, unsigned maxReductions = 8,
+      const std::vector<double>& prescribedSteps = {});
+  const PseudoDiagnostics& GetPseudoDiagnostics() const { return pseudoDiagnostics; }
   double GetPhysicalTime() const { return physicalTime; }
   State ReconstructAt(unsigned long point, const Direction& coordinate) const;
   const PrimitiveEuler2D::Gradient& GetLimitedGradient(unsigned long point) const { return limitedGradient.at(point); }

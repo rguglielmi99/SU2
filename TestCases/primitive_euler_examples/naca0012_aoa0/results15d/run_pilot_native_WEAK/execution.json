@@ -1,0 +1,10 @@
+{
+  "label": "pilot_native_WEAK",
+  "initial": "native",
+  "policy": "WEAK",
+  "cfl": 0.05,
+  "requested_steps": 300,
+  "seconds": 11.243625918999896,
+  "returncode": 0,
+  "stop_reason": "iteration_cap"
+}

@@ -1,0 +1,28 @@
+{
+  "kind": "diagnostic_only_not_stationary_certification",
+  "sources_sha256": {
+    "QuickStart/mesh_NACA0012_inv.su2": "9094b51c2628d3bb4c865d774b2308dbb59a213ad19c007cfcd7d57e7aaeebeb",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results/native/native_state_000599.dat": "cbb014b7a30800f338b690daa8388bf603c4d551ac9a862d554f0cefe3603857",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/native_initial.dat": "0c0caac3f79ff64c977bebb8ad8de726f34605e8024a693d34293270cf4effa7",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/run_final_native_PROJECTED_cfl005/primitive_state_00000.dat": "ef5cd1287cf94163d99daf2dd39e1fda40c6b3d6fcba2debc79eab4e47f4b3e6",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/run_final_native_PROJECTED_cfl005/primitive_state_09000.dat": "d04cad2c595de2f0ff135c38026315e70a4033c20f4a7f1f2d193655dc53a3d5",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/run_final_native_PROJECTED_cfl005/history.csv": "ea9e9304299bb9737e69a62f3431616290ecaee5e740e2ef11f63d4fc4c86e9d",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/run_final_native_PROJECTED_cfl005/surface_primitive_pressure_0.csv": "ea134af8cb7d4d5fdffb20ad26d784e30adf790ca931ac0647efd8f0cc848080",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results15d/run_final_native_PROJECTED_cfl005/surface_primitive_pressure_9000.csv": "c40d08699652de437c56a857e80fac40406c7e86a71dfb93e2326c502dce728e",
+    "TestCases/primitive_euler_examples/naca0012_aoa0/results/native/history.csv": "1a16da175d70a6c40e476114c65b3d53038c28f7939969ea74fb18d462946b6f"
+  },
+  "pressure_precision": "17-significant-digit CSV from Float64 solver fields",
+  "interpolation": "none",
+  "p_inf": 1.0,
+  "q_inf": 0.028,
+  "ref_area": 1.0,
+  "samples": 400,
+  "upper": 200,
+  "lower": 200,
+  "native_cd_common": 0.00030518006703445877,
+  "primitive_cd": -0.0032136254169410957,
+  "delta_cd": -0.003518805483975554,
+  "cd_reproduction_error": 5.095750210681871e-18,
+  "spatial_rhs_final": 2.7717673143252292e-05,
+  "te_rhs_final": 0.07942074615142793
+}

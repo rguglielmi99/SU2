@@ -6,12 +6,14 @@
 #include "catch.hpp"
 #include "primitive_euler_mesh_fixture.hpp"
 #include "../../SU2_CFD/include/solvers/CPrimitiveEulerSolver.hpp"
+#include "../../SU2_CFD/include/iteration/primitive_euler_weak_te_config.hpp"
 #include "../../SU2_CFD/include/solvers/CEulerSolver.hpp"
 #include "../../SU2_CFD/include/iteration/primitive_euler_boundary_config.hpp"
 #include "../../SU2_CFD/include/numerics/flow/primitive_euler_boundary.hpp"
 #include "../../SU2_CFD/include/gradients/computeGradientsLeastSquares.hpp"
 #include "../../SU2_CFD/include/gradients/computeGradientsGreenGauss.hpp"
 #include <set>
+#include <fstream>
 
 using namespace PrimitiveEuler2D;
 using namespace PrimitiveEulerTest;
@@ -175,7 +177,7 @@ TEST_CASE("Explicit per-instance weak NACA tip keeps local face BCs and evolves 
          << "CONV_NUM_METHOD_FLOW=ROE\nFLUID_MODEL=IDEAL_GAS\nGAMMA_VALUE=1.4\nGAS_CONSTANT=1\n"
          << "REF_DIMENSIONALIZATION=DIMENSIONAL\nFREESTREAM_OPTION=DENSITY_FS\nINIT_OPTION=TD_CONDITIONS\n"
          << "FREESTREAM_DENSITY=1\nFREESTREAM_PRESSURE=1\nAOA=0\nMACH_NUMBER=" << std::setprecision(17) << .4/std::sqrt(1.4) << "\n"
-         << "PRIMITIVE_INITIALIZATION=FREESTREAM\nPRIMITIVE_INITIAL_STATE=(1,.4,0,1)\n"
+         << "PRIMITIVE_INITIALIZATION=FREESTREAM\nPRIMITIVE_INITIAL_STATE=(1,.4,0,1)\nPRIMITIVE_WEAK_TE_GLOBAL_ID=199\n"
          << "PRIMITIVE_BOUNDARY_MODE=LOCAL_CHARACTERISTIC\nPRIMITIVE_VOLUME_QUADRATURE=NODE_POINT\n"
          << "MUSCL_FLOW=YES\nNUM_METHOD_GRAD_RECON=WEIGHTED_LEAST_SQUARES\nSLOPE_LIMITER_FLOW=NONE\n";
     c.reset(new CConfig(text,SU2_COMPONENT::SU2_CFD,false));
@@ -195,6 +197,8 @@ TEST_CASE("Explicit per-instance weak NACA tip keeps local face BCs and evolves 
   REQUIRE(wall<g->GetnMarker()); REQUIRE(far<g->GetnMarker());
   for (unsigned long i=0;i<g->GetnPoint();++i) if (g->nodes->GetGlobalIndex(i)==199) tip=i;
   REQUIRE(tip<g->GetnPoint()); REQUIRE(g->nodes->GetVertex(tip,wall)>=0);
+  const auto configured=PrimitiveEulerWeakTEConfig::LocalNodes(*g,*c);
+  REQUIRE(configured.size()==1); CHECK(configured.front()==tip);
   REQUIRE(g->nodes->GetCoord(tip,0)==Precise(1)); REQUIRE(g->nodes->GetCoord(tip,1)==Precise(0));
   CPrimitiveEulerSolver strong(g.get(),c.get(),0);
   // Pure pressure diagnostic: requires neither a wall projection nor TE authorization.
@@ -393,6 +397,130 @@ TEST_CASE("Acute exterior trailing edge rejects misleading mean and split-marker
     CHECK_THROWS_AS(s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),0,
         [](const Direction&,double,const State& w,const Direction&,unsigned short){return w;}),std::invalid_argument);
   }
+}
+
+TEST_CASE("Local pseudo-time preserves strong wall slip and leaves an authorized weak tip unprojected", "[primitive-pseudo-time]") {
+  const std::vector<Direction> xy{{{-1,-1}},{{2,-1}},{{2,1}},{{-1,1}},
+      {{0,0}},{{.4,-.12}},{{1,0}},{{.4,.12}}};
+  std::vector<Triangle> cells;
+  for (unsigned long i=0;i<4;++i) {
+    const auto j=(i+1)%4;
+    cells.push_back({{i,j,4+j}}); cells.push_back({{i,4+j,4+i}});
+  }
+  const std::vector<BoundaryMarker> markers{{"wall",{{{5,6}},{{6,7}}}},
+      {"open",{{{0,1}},{{1,2}},{{2,3}},{{3,0}},{{4,5}},{{7,4}}}}};
+  MeshFixture f(xy,cells,"PRIMITIVE_EULER",teOptions+"MARKER_EULER=(wall)\nMARKER_CUSTOM=(open)\n","",markers);
+  CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0,{6});
+  for (unsigned i=0;i<xy.size();++i) solver.GetPrimitiveNodes().SetPrimitiveState(i,{{1,.4,0,1}});
+  CHECK(solver.ProjectFreestreamWallVelocity()==2);
+  const CPrimitiveEulerSolver::BoundaryState exterior=[](const Direction&,double,const State& w,const Direction&,unsigned short) {return w;};
+  const auto before=solver.GetPrimitiveNodes().GetPrimitiveState(6);
+  const auto initial=solver.ComputeSpatialResidual(f.geometry.get(),f.config.get(),0,exterior);
+  std::vector<State> old;
+  for (unsigned i=0;i<xy.size();++i) old.push_back(solver.GetPrimitiveNodes().GetPrimitiveState(i));
+  solver.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.01,exterior);
+  const auto& info=solver.GetPseudoDiagnostics();
+  auto expected=before; for (unsigned k=0;k<4;++k) expected[k]+=info.steps[6]*initial.rhs[6][k];
+  Same(solver.GetPrimitiveNodes().GetPrimitiveState(6),expected);
+  CHECK(solver.GetPrimitiveNodes().GetPrimitiveState(6)[1]>.1); // A hidden mean-normal projection would kill u.
+  for (unsigned node:{5u,7u}) {
+    Direction sum{};
+    for (const auto& face:solver.GetGeometryMetrics().GetBoundaryFaces()) if (face.node==node && face.marker==0)
+      for (unsigned d=0;d<2;++d) sum[d]+=face.normal[d];
+    const auto w=solver.GetPrimitiveNodes().GetPrimitiveState(node);
+    CHECK(std::abs(w[1]*sum[0]+w[2]*sum[1])<1e-14);
+    for (unsigned k=0;k<4;++k) CHECK(w[k]==Approx(old[node][k]+info.steps[node]*initial.rhs[node][k]).margin(2e-13));
+  }
+}
+
+TEST_CASE("Explicit projected TE accounts its reaction and preserves ordinary wall constraints", "[primitive-te-policy]") {
+  const std::vector<Direction> xy{{{-1,-1}},{{2,-1}},{{2,1}},{{-1,1}},
+      {{0,0}},{{.4,-.12}},{{1,0}},{{.4,.12}}};
+  std::vector<Triangle> cells;
+  for (unsigned long i=0;i<4;++i) {
+    const auto j=(i+1)%4;
+    cells.push_back({{i,j,4+j}}); cells.push_back({{i,4+j,4+i}});
+  }
+  const std::vector<BoundaryMarker> markers{{"wall",{{{5,6}},{{6,7}}}},
+      {"open",{{{0,1}},{{1,2}},{{2,3}},{{3,0}},{{4,5}},{{7,4}}}}};
+  const CPrimitiveEulerSolver::BoundaryState exterior=[](const Direction&,double,const State& w,const Direction&,unsigned short) {return w;};
+  MeshFixture weak(xy,cells,"PRIMITIVE_EULER",teOptions+"MARKER_EULER=(wall)\nMARKER_CUSTOM=(open)\n","",markers);
+  MeshFixture projected(xy,cells,"PRIMITIVE_EULER",teOptions+
+      "PRIMITIVE_WEAK_TE_GLOBAL_ID=6\nPRIMITIVE_TE_POLICY=PROJECTED\nMARKER_EULER=(wall)\nMARKER_CUSTOM=(open)\n","",markers);
+  CPrimitiveEulerSolver a(weak.geometry.get(),weak.config.get(),0,{6});
+  CPrimitiveEulerSolver b(projected.geometry.get(),projected.config.get(),0,{6});
+  CHECK(a.ProjectInitialWallVelocity()==2);
+  CHECK(b.ProjectInitialWallVelocity()==3);
+  for (unsigned i:{5u,7u}) Same(a.GetPrimitiveNodes().GetPrimitiveState(i),b.GetPrimitiveNodes().GetPrimitiveState(i));
+  CHECK(a.GetPrimitiveNodes().GetPrimitiveState(6)[1]>.1);
+  CHECK(std::abs(b.GetPrimitiveNodes().GetPrimitiveState(6)[1])<1e-14);
+  // Identical compatible field: the only spatial difference must be the TE reaction.
+  auto tip=b.GetPrimitiveNodes().GetPrimitiveState(6); tip[2]=.02;
+  a.GetPrimitiveNodes().SetPrimitiveState(6,tip); b.GetPrimitiveNodes().SetPrimitiveState(6,tip);
+  const auto ra=a.ComputeSpatialResidual(weak.geometry.get(),weak.config.get(),0,exterior);
+  const auto rb=b.ComputeSpatialResidual(projected.geometry.get(),projected.config.get(),0,exterior);
+  for (unsigned i=0;i<xy.size();++i) {
+    Same(ra.faces[i],rb.faces[i]); Same(ra.volume[i],rb.volume[i]);
+    if (i!=6) { Same(ra.boundary[i],rb.boundary[i]); Same(ra.rhs[i],rb.rhs[i]); }
+  }
+  CHECK(rb.rhs[6][1]==Approx(0).margin(1e-14));
+  CHECK(rb.rhs[6][0]==ra.rhs[6][0]); CHECK(rb.rhs[6][3]==ra.rhs[6][3]);
+  const double volume=b.GetGeometryMetrics().GetCell(6).volume;
+  CHECK(rb.boundary[6][1]-ra.boundary[6][1]==Approx(volume*ra.rhs[6][1]).margin(1e-14));
+  std::vector<State> old;
+  for (unsigned i=0;i<xy.size();++i) old.push_back(b.GetPrimitiveNodes().GetPrimitiveState(i));
+  b.AdvanceLocalPseudoTime(projected.geometry.get(),projected.config.get(),.01,exterior);
+  const auto& info=b.GetPseudoDiagnostics();
+  for (unsigned i=0;i<xy.size();++i) {
+    auto expected=old[i]; for (unsigned k=0;k<4;++k) expected[k]+=info.steps[i]*rb.rhs[i][k];
+    Same(b.GetPrimitiveNodes().GetPrimitiveState(i),expected);
+  }
+  CHECK(std::abs(b.GetPrimitiveNodes().GetPrimitiveState(6)[1])<1e-14);
+  std::vector<State> accepted,acceptedResidual;
+  for (unsigned i=0;i<xy.size();++i) {
+    accepted.push_back(b.GetPrimitiveNodes().GetPrimitiveState(i));
+    State r{}; for (unsigned k=0;k<4;++k) r[k]=SU2_TYPE::GetValue(b.LinSysRes(i,k));
+    acceptedResidual.push_back(r);
+  }
+  const CPrimitiveEulerSolver::Source impossible=[](const Direction&,double) {return State{{-1e200,0,0,0}};};
+  CHECK_THROWS_AS(b.AdvanceLocalPseudoTime(projected.geometry.get(),projected.config.get(),.01,exterior,impossible,0),std::domain_error);
+  for (unsigned i=0;i<xy.size();++i) {
+    Same(b.GetPrimitiveNodes().GetPrimitiveState(i),accepted[i]);
+    for (unsigned k=0;k<4;++k) CHECK(b.LinSysRes(i,k)==acceptedResidual[i][k]);
+  }
+  CHECK_THROWS_AS(b.ProjectInitialWallVelocity(),std::invalid_argument);
+}
+
+TEST_CASE("Primitive FILE initialization validates complete IDs coordinates and states transactionally", "[primitive-initial-file]") {
+  const std::vector<Direction> xy{{{0,0}},{{1,0}},{{0,1}}};
+  MeshFixture f(xy,{{{0,1,2}}},"PRIMITIVE_EULER",
+      "TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\nPRIMITIVE_INITIALIZATION=FILE\n");
+  CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0);
+  const auto path=std::filesystem::temp_directory_path()/"primitive15d-initial-test.dat";
+  const auto save=[&](unsigned variant) {
+    std::ofstream out(path,std::ios::binary);
+    const std::array<int,5> header{{535532,7,variant==4?2:3,0,0}};
+    out.write(reinterpret_cast<const char*>(header.data()),sizeof(header));
+    for (const std::string name:{"x","y","Density","Velocity_x","Velocity_y","Pressure","GlobalIndex"}) {
+      std::array<char,33> buffer{}; std::copy(name.begin(),name.end(),buffer.begin());
+      out.write(buffer.data(),buffer.size());
+    }
+    for (unsigned i=0;i<3;++i) {
+      std::array<double,7> row{{xy[i][0],xy[i][1],2,.3,.1,3,static_cast<double>(i)}};
+      if (i==2 && variant==1) row[6]=0;
+      if (i==2 && variant==2) row[0]+=.01;
+      if (i==2 && variant==3) row[5]=-1;
+      out.write(reinterpret_cast<const char*>(row.data()),sizeof(row));
+    }
+  };
+  save(0); solver.InitializePrimitiveFile(path.string());
+  for (unsigned i=0;i<3;++i) Same(solver.GetPrimitiveNodes().GetPrimitiveState(i),{{2,.3,.1,3}});
+  for (unsigned variant:{1u,2u,3u,4u}) {
+    save(variant);
+    CHECK_THROWS_AS(solver.InitializePrimitiveFile(path.string()),std::invalid_argument);
+    for (unsigned i=0;i<3;++i) Same(solver.GetPrimitiveNodes().GetPrimitiveState(i),{{2,.3,.1,3}});
+  }
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("Finite thickness closure has two distinct reentrant corner constraints", "[primitive-trailing-edge]") {

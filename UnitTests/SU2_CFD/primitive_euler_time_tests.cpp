@@ -23,6 +23,115 @@ void Check(const State& a,const State& b,double tolerance=2e-12) {
 }
 }
 
+TEST_CASE("Local pseudo-time is synchronous stationary and consistent with equal-step Forward Euler", "[primitive-pseudo-time]") {
+  MeshFixture fixture(points,elements,"PRIMITIVE_EULER",options);
+  CPrimitiveEulerSolver local(fixture.geometry.get(),fixture.config.get(),0),
+                        physical(fixture.geometry.get(),fixture.config.get(),0);
+  for (unsigned long i=0;i<points.size();++i) local.GetPrimitiveNodes().SetPrimitiveState(i,{{1,0,0,1}});
+  local.AdvanceLocalPseudoTime(fixture.geometry.get(),fixture.config.get(),.1,extrapolate);
+  CHECK(local.GetPseudoDiagnostics().ratio>1.1);
+  for (unsigned long i=0;i<points.size();++i) Check(local.GetPrimitiveNodes().GetPrimitiveState(i),{{1,0,0,1}},0);
+  const auto source=[](const Direction& x,double t) { CHECK(t==0); return State{{.1+x[0],-.3,.2,.1+x[1]}}; };
+  std::vector<State> before(points.size());
+  for (unsigned long i=0;i<points.size();++i) {
+    before[i]={{2+.1*points[i][0],.5+.03*points[i][1],.3,3+.2*points[i][1]}};
+    local.GetPrimitiveNodes().SetPrimitiveState(i,before[i]); physical.GetPrimitiveNodes().SetPrimitiveState(i,before[i]);
+  }
+  const auto rhs=local.ComputeSpatialResidual(fixture.geometry.get(),fixture.config.get(),0,extrapolate,source);
+  const double dt=1e-5;
+  physical.AdvanceExplicitEuler(fixture.geometry.get(),fixture.config.get(),0,dt,extrapolate,source);
+  local.AdvanceLocalPseudoTime(fixture.geometry.get(),fixture.config.get(),.1,extrapolate,source,0,std::vector<double>(points.size(),dt));
+  CHECK(local.GetPhysicalTime()==0); CHECK(physical.GetPhysicalTime()==dt);
+  for (unsigned long i=0;i<points.size();++i) {
+    Check(local.GetPrimitiveNodes().GetPrimitiveState(i),physical.GetPrimitiveNodes().GetPrimitiveState(i),0);
+    auto expected=before[i]; for (unsigned k=0;k<4;++k) expected[k]+=dt*rhs.rhs[i][k];
+    Check(local.GetPrimitiveNodes().GetPrimitiveState(i),expected,0);
+    local.GetPrimitiveNodes().SetPrimitiveState(i,before[i]);
+  }
+  local.AdvanceLocalPseudoTime(fixture.geometry.get(),fixture.config.get(),.01,extrapolate,source);
+  const auto& info=local.GetPseudoDiagnostics();
+  for (unsigned long i=0;i<points.size();++i) {
+    CHECK(info.steps[i]==Approx(.01*local.GetGeometryMetrics().GetCell(i).volume/rhs.spectralRadius[i]).epsilon(1e-14));
+    auto expected=before[i]; for (unsigned k=0;k<4;++k) expected[k]+=info.steps[i]*rhs.rhs[i][k];
+    Check(local.GetPrimitiveNodes().GetPrimitiveState(i),expected,0);
+  }
+  const auto fresh=local.ComputeSpatialResidual(fixture.geometry.get(),fixture.config.get(),0,extrapolate,source);
+  for (unsigned long i=0;i<points.size();++i) for (unsigned k=0;k<4;++k)
+    CHECK(local.LinSysRes(i,k)==-local.GetGeometryMetrics().GetCell(i).volume*fresh.rhs[i][k]);
+  const auto frozen=local.GetPrimitiveNodes().GetSolution();
+  const auto tiny=local.AdvanceLocalPseudoTime(fixture.geometry.get(),fixture.config.get(),1e-300,extrapolate,source);
+  double residualNorm=0;
+  for (unsigned long i=0;i<points.size();++i) for (unsigned k=0;k<4;++k) {
+    CHECK(local.GetPrimitiveNodes().GetSolution(i,k)==frozen(i,k)); // Update rounds away.
+    residualNorm+=tiny.rhs[i][k]*tiny.rhs[i][k];
+  }
+  CHECK(residualNorm>.1); // A tiny update must never masquerade as a small spatial residual.
+}
+
+TEST_CASE("Local pseudo-time backtracks globally and restores all work arrays on exhausted or exceptional attempts", "[primitive-pseudo-time]") {
+  MeshFixture f(points,elements,"PRIMITIVE_EULER",options);
+  CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0);
+  for (unsigned long i=0;i<points.size();++i) s.GetPrimitiveNodes().SetPrimitiveState(i,{{1,0,0,1}});
+  const auto sink=[](const Direction&,double) { return State{{-2,0,0,-2}}; };
+  std::vector<double> steps{1,2,1,2,1};
+  s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate,sink,8,steps);
+  const auto& info=s.GetPseudoDiagnostics();
+  REQUIRE(info.reductions==3); CHECK(info.effectiveCfl==Approx(.0125)); CHECK(info.rejectedAttempts==3);
+  for (unsigned long i=0;i<points.size();++i) {
+    CHECK(info.steps[i]==steps[i]/8);
+    Check(s.GetPrimitiveNodes().GetPrimitiveState(i),{{1-steps[i]/4,0,0,1-steps[i]/4}},0);
+  }
+  auto& nodes=s.GetPrimitiveNodes();
+  const auto solution=nodes.GetSolution();
+  const auto raw=nodes.GetGradient_Reconstruction(),rmatrix=nodes.GetRmatrix();
+  const auto limiter=nodes.GetLimiter();
+  std::vector<State> residual(points.size()),old(points.size());
+  std::vector<Gradient> gradient(points.size()); std::vector<double> theta(points.size());
+  for (unsigned long i=0;i<points.size();++i) {
+    gradient[i]=s.GetLimitedGradient(i); theta[i]=s.GetPositivityScale(i);
+    for (unsigned k=0;k<4;++k) { residual[i][k]=SU2_TYPE::GetValue(s.LinSysRes(i,k)); old[i][k]=SU2_TYPE::GetValue(nodes.GetSolution_Old(i,k)); }
+  }
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate,sink,1,steps),std::domain_error);
+  const auto throwing=[](const Direction&,double,const State&,const Direction&,unsigned short)->State {throw std::runtime_error("callback failure");};
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,throwing),std::runtime_error);
+  CHECK(s.GetPseudoDiagnostics().rejectedIterations==2);
+  CHECK(s.GetPseudoDiagnostics().rejectedAttempts==5); CHECK(s.GetPseudoDiagnostics().accepted==1);
+  CHECK(s.GetPhysicalTime()==0);
+  for (unsigned long i=0;i<points.size();++i) {
+    CHECK(s.GetLimitedGradient(i)==gradient[i]); CHECK(s.GetPositivityScale(i)==theta[i]);
+    for (unsigned k=0;k<4;++k) {
+      CHECK(nodes.GetSolution(i,k)==solution(i,k)); CHECK(nodes.GetSolution_Old(i,k)==old[i][k]);
+      CHECK(s.LinSysRes(i,k)==residual[i][k]); CHECK(nodes.GetLimiter(i,k)==limiter(i,k));
+      for (unsigned d=0;d<2;++d) CHECK(nodes.GetGradient_Reconstruction()(i,k,d)==raw(i,k,d));
+    }
+    for (unsigned a=0;a<2;++a) for (unsigned b=0;b<2;++b) CHECK(nodes.GetRmatrix(i,a,b)==rmatrix(i,a,b));
+  }
+  CHECK_NOTHROW(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.01,extrapolate));
+}
+
+TEST_CASE("Local pseudo-time rejects invalid CFL states geometry and step requests", "[primitive-pseudo-time]") {
+  MeshFixture f(points,elements,"PRIMITIVE_EULER",options);
+  CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0);
+  for (double bad:{0.,-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+    CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),bad,extrapolate),std::invalid_argument);
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate,{},0,{1}),std::invalid_argument);
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate,{},0,std::vector<double>(points.size(),0)),std::invalid_argument);
+  auto& cell=const_cast<CAggregatedGeometry::Cell&>(s.GetGeometryMetrics().GetCell(0));
+  const double volume=cell.volume;
+  for (double invalid:{-1.,0.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+    cell.volume=invalid;
+    CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate),std::invalid_argument);
+  }
+  cell.volume=volume;
+  s.GetPrimitiveNodes().GetSolution(0)[3]=std::numeric_limits<double>::quiet_NaN();
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate),std::invalid_argument);
+  s.GetPrimitiveNodes().SetPrimitiveState(0,{{1,.5,.3,1}});
+  const auto bad=[](const Direction&,double,const State&,const Direction&,unsigned short) {return State{{1,0,0,std::numeric_limits<double>::infinity()}};};
+  CHECK_THROWS_AS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,bad),std::invalid_argument);
+  for (unsigned long i=0;i<points.size();++i) s.GetPrimitiveNodes().SetPrimitiveState(i,{{1e-308,0,0,1e308}});
+  CHECK_THROWS(s.AdvanceLocalPseudoTime(f.geometry.get(),f.config.get(),.1,extrapolate)); // Spectral overflow, despite finite positive inputs.
+}
+
 TEST_CASE("Forward Euler applies one rhs with correct sign volume coordinates and stage time", "[primitive-solver][primitive-time]") {
   MeshFixture fixture(points,elements,"PRIMITIVE_EULER",options);
   CPrimitiveEulerSolver solver(fixture.geometry.get(),fixture.config.get(),0);

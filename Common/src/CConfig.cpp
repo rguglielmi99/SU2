@@ -251,6 +251,16 @@ CConfig::CConfig(char case_filename[MAX_STRING_SIZE], CConfig *config) {
 
 void CConfig::ConfigurePrimitiveDriverTime() {
   if (Kind_Solver != MAIN_SOLVER::PRIMITIVE_EULER) return;
+  if (PrimitiveLocalPseudoTime) {
+    // TIME_ITER/TimeIter are bookkeeping only; no physical clock advances.
+    if (!Time_Domain || TimeMarching!=TIME_MARCHING::TIME_STEPPING ||
+        PrimitiveRequestedMGLevels!=0 || Kind_TimeIntScheme_Flow!=EULER_EXPLICIT ||
+        !OptionIsSet("TIME_ITER") || nTimeIter==0 || Time_Step!=0 || Unst_CFL!=0 || OptionIsSet("MAX_TIME") ||
+        !std::isfinite(SU2_TYPE::GetValue(CFLFineGrid)) || CFLFineGrid<=0)
+      SU2_MPI::Error("Local primitive pseudo-time requires TIME_DOMAIN=YES, TIME_STEPPING, explicit TIME_ITER, EULER_EXPLICIT, MGLEVEL=0, TIME_STEP=0, UNST_CFL_NUMBER=0, positive CFL_NUMBER and no MAX_TIME.", CURRENT_FUNCTION);
+    Max_Time=std::numeric_limits<passivedouble>::max();
+    return;
+  }
   if (!Time_Domain || TimeMarching != TIME_MARCHING::TIME_STEPPING)
     SU2_MPI::Error("PRIMITIVE_EULER driver requires TIME_DOMAIN=YES and TIME_MARCHING=TIME_STEPPING.", CURRENT_FUNCTION);
   if (PrimitiveRequestedMGLevels != 0)
@@ -1155,6 +1165,10 @@ void CConfig::SetConfig_Options() {
   addStringOption("PRIMITIVE_BOUNDARY_MODE", PrimitiveBoundaryMode, "UNIFORM");
   addDoubleArrayOption("PRIMITIVE_BOUNDARY_STATE", 4, false, PrimitiveBoundaryState.data());
   addStringOption("PRIMITIVE_GEOMETRY_AUDIT", PrimitiveGeometryAudit, "");
+  addLongOption("PRIMITIVE_WEAK_TE_GLOBAL_ID", PrimitiveWeakTEGlobalID, -1);
+  addStringOption("PRIMITIVE_TE_POLICY", PrimitiveTEPolicy, "WEAK");
+  addStringOption("PRIMITIVE_INITIAL_FILE", PrimitiveInitialFile, "");
+  addBoolOption("PRIMITIVE_LOCAL_PSEUDO_TIME", PrimitiveLocalPseudoTime, false);
   /*!\brief MULTIZONE \n DESCRIPTION: Enable multizone mode \ingroup Config*/
   addBoolOption("MULTIZONE", Multizone_Problem, NO);
   /*!\brief PHYSICAL_PROBLEM \n DESCRIPTION: Physical governing equations \n Options: see \link Solver_Map \endlink \n DEFAULT: NONE \ingroup Config*/
@@ -3997,6 +4011,18 @@ void CConfig::SetPostprocessing(SU2_COMPONENT val_software, unsigned short val_i
 
   // Preserve the raw request for driver validation; API-only tests retain their contract.
   PrimitiveRequestedMGLevels = nMGLevels;
+  if (OptionIsSet("PRIMITIVE_TE_POLICY") &&
+      (Kind_Solver!=MAIN_SOLVER::PRIMITIVE_EULER || PrimitiveWeakTEGlobalID<0 ||
+       (PrimitiveTEPolicy!="WEAK" && PrimitiveTEPolicy!="PROJECTED")))
+    SU2_MPI::Error("PRIMITIVE_TE_POLICY requires PRIMITIVE_EULER, an explicit TE ID and WEAK or PROJECTED.", CURRENT_FUNCTION);
+  if (OptionIsSet("PRIMITIVE_INITIAL_FILE") &&
+      (Kind_Solver!=MAIN_SOLVER::PRIMITIVE_EULER || PrimitiveInitialization!="FILE" || PrimitiveInitialFile.empty()))
+    SU2_MPI::Error("PRIMITIVE_INITIAL_FILE requires PRIMITIVE_EULER and PRIMITIVE_INITIALIZATION=FILE.", CURRENT_FUNCTION);
+  if (OptionIsSet("PRIMITIVE_LOCAL_PSEUDO_TIME") && Kind_Solver!=MAIN_SOLVER::PRIMITIVE_EULER)
+    SU2_MPI::Error("PRIMITIVE_LOCAL_PSEUDO_TIME is available only for PRIMITIVE_EULER.", CURRENT_FUNCTION);
+  if (OptionIsSet("PRIMITIVE_WEAK_TE_GLOBAL_ID") &&
+      (Kind_Solver != MAIN_SOLVER::PRIMITIVE_EULER || PrimitiveWeakTEGlobalID < 0))
+    SU2_MPI::Error("PRIMITIVE_WEAK_TE_GLOBAL_ID requires PRIMITIVE_EULER and a nonnegative global mesh ID.", CURRENT_FUNCTION);
 
   /*--- Check for unsteady problem ---*/
 
@@ -4033,7 +4059,10 @@ void CConfig::SetPostprocessing(SU2_COMPONENT val_software, unsigned short val_i
       StartWindowIteration = Restart_Iter;
     }
 
-    if (Time_Step <= 0.0 && Unst_CFL == 0.0){ SU2_MPI::Error("Invalid value for TIME_STEP.", CURRENT_FUNCTION); }
+    if (Time_Step <= 0.0 && Unst_CFL == 0.0 &&
+        !(Kind_Solver==MAIN_SOLVER::PRIMITIVE_EULER && PrimitiveLocalPseudoTime)) {
+      SU2_MPI::Error("Invalid value for TIME_STEP.", CURRENT_FUNCTION);
+    }
   } else {
     nTimeIter = 1;
     Time_Step = 0;

@@ -1,0 +1,10 @@
+{
+  "label": "pilot_freestream_PROJECTED",
+  "initial": "freestream",
+  "policy": "PROJECTED",
+  "cfl": 0.05,
+  "requested_steps": 300,
+  "seconds": 11.674058799995692,
+  "returncode": 0,
+  "stop_reason": "iteration_cap"
+}
