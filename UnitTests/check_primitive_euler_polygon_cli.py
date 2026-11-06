@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Small polygonal-wall driver smoke; no convergence campaign or native oracle."""
 import argparse
+import csv
 import math
 import os
 from pathlib import Path
@@ -31,6 +32,8 @@ def main():
     cfg = cfg.replace('PRIMITIVE_BOUNDARY_STATE=(2,0.5,0.3,3)', 'PRIMITIVE_BOUNDARY_STATE=(1,0.4,0.2,1)')
     cfg = cfg.replace('MACH_NUMBER=0.4', f'MACH_NUMBER={math.sqrt(.2/1.4):.17g}')
     cfg += f'GAS_CONSTANT=1\nAOA={math.degrees(math.atan2(.2,.4)):.17g}\n'
+    cfg += 'MARKER_MONITORING=(wall)\nREF_AREA=1\n'
+    cfg = cfg.replace('PRIMITIVE_RHS,PRIMITIVE_STATE)', 'PRIMITIVE_RHS,PRIMITIVE_STATE,AERO_COEFF)')
     (out / 'case.cfg').write_text(cfg)
     result = subprocess.run([str(args.executable.resolve()), 'case.cfg'], cwd=out,
                             env={**os.environ, 'OMP_NUM_THREADS': '1'},
@@ -57,7 +60,29 @@ def main():
             np.testing.assert_allclose(data['Pressure'], 1, atol=1e-14, rtol=0)
             np.testing.assert_allclose(velocity[3:], np.tile([.4, .2], (3, 1)), atol=1e-14, rtol=0)
             assert np.min(np.linalg.norm(velocity[:3], axis=1)) > .3
-    print(f'PASS polygon CLI: {len(snapshots)} finite positive snapshots, nodal slip preserved')
+    tables = sorted(out.glob('*_primitive_pressure_*.csv'))
+    assert len(tables) == len(snapshots), 'One surface table per output step, independent of output formats'
+    for path in tables:
+        with path.open() as stream:
+            rows = list(csv.DictReader(stream))
+        assert len(rows) == 4 and all(r['marker'] == 'wall' for r in rows)
+        assert all(math.isfinite(float(r['Cp'])) and float(r['p']) > 0 for r in rows)
+    with (out / 'history.csv').open() as stream:
+        history = [{key.strip(): value for key, value in row.items()}
+                   for row in csv.DictReader(stream, skipinitialspace=True)]
+    for row in history:
+        assert math.isfinite(float(row['CL'])) and math.isfinite(float(row['CD']))
+        step = int(row['Time_Iter'])
+        matches = [p for p in tables if p.stem.endswith(f'_{step}')]
+        if not matches:
+            continue
+        with matches[0].open() as stream:
+            rows = list(csv.DictReader(stream))
+        force = [sum((float(r['p'])-1)*float(r[n]) for r in rows) for n in ['nx', 'ny']]
+        alpha = math.atan2(.2, .4)
+        np.testing.assert_allclose(float(row['CD']), (force[0]*math.cos(alpha)+force[1]*math.sin(alpha))/.1, atol=1e-12)
+        np.testing.assert_allclose(float(row['CL']), (-force[0]*math.sin(alpha)+force[1]*math.cos(alpha))/.1, atol=1e-12)
+    print(f'PASS polygon CLI: {len(snapshots)} snapshots, {len(tables)} pressure tables, CL/CD history matches half-face forces')
 
 
 if __name__ == '__main__':

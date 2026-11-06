@@ -15,6 +15,7 @@ CPrimitiveEulerOutput::CPrimitiveEulerOutput(CConfig* c,unsigned short dim) : CF
   if (nRequestedHistoryFields==0) {
     RequestCommonHistory(true);
     requestedHistoryFields.emplace_back("PRIMITIVE_RHS");
+    if (c->GetnMarker_Monitoring()) requestedHistoryFields.emplace_back("AERO_COEFF");
     nRequestedHistoryFields=requestedHistoryFields.size();
   }
   if (nRequestedScreenFields==0) {
@@ -31,7 +32,11 @@ CPrimitiveEulerOutput::CPrimitiveEulerOutput(CConfig* c,unsigned short dim) : CF
   restartFilename=c->GetRestart_FileName();
   multiZoneHeaderString="Primitive Euler";
 }
-void CPrimitiveEulerOutput::SetHistoryOutputFields(CConfig*) {
+void CPrimitiveEulerOutput::SetHistoryOutputFields(CConfig* c) {
+  if (c->GetnMarker_Monitoring()) {
+    AddHistoryOutput("LIFT","CL",ScreenOutputFormat::SCIENTIFIC,"AERO_COEFF","Primitive reconstructed pressure lift",HistoryFieldType::COEFFICIENT);
+    AddHistoryOutput("DRAG","CD",ScreenOutputFormat::SCIENTIFIC,"AERO_COEFF","Primitive reconstructed pressure drag",HistoryFieldType::COEFFICIENT);
+  }
   for (unsigned k=0;k<4;++k)
     AddHistoryOutput("RHS_"+key[k],"L2_rhs_"+key[k],ScreenOutputFormat::SCIENTIFIC,"PRIMITIVE_RHS",
                      "Volume-weighted L2 of accepted-stage primitive RHS (linear, all nodes)");
@@ -41,6 +46,11 @@ void CPrimitiveEulerOutput::SetHistoryOutputFields(CConfig*) {
 }
 void CPrimitiveEulerOutput::LoadHistoryData(CConfig* c,CGeometry* g,CSolver** solvers) {
   auto* s=static_cast<CPrimitiveEulerSolver*>(solvers[FLOW_SOL]);
+  const auto aero=s->ComputeAerodynamics(g,c);
+  if (aero.enabled) {
+    SetHistoryOutputValue("LIFT",aero.cl);
+    SetHistoryOutputValue("DRAG",aero.cd);
+  }
   std::array<double,4> square{};
   double total=0,minrho=std::numeric_limits<double>::max(),minp=minrho,theta=1;
   for (unsigned long i=0;i<g->GetnPoint();++i) {
@@ -82,6 +92,20 @@ bool CPrimitiveEulerOutput::WriteVolumeOutput(CConfig* c,unsigned long,bool forc
   return force || c->GetTimeIter()%c->GetVolumeOutputFrequency(file)==0;
 }
 void CPrimitiveEulerOutput::WriteAdditionalFiles(CConfig* c,CGeometry* g,CSolver** solvers) {
+  // Called once per requested volume format: write the half-face table only once per output step.
+  if (c->GetnMarker_Monitoring() && lastPressureOutput!=c->GetTimeIter()) {
+    const auto aero=static_cast<CPrimitiveEulerSolver*>(solvers[FLOW_SOL])->ComputeAerodynamics(g,c);
+    const auto name=c->GetSurfCoeff_FileName()+"_primitive_pressure_"+std::to_string(c->GetTimeIter())+".csv";
+    std::ofstream pressure(name);
+    if (!pressure) SU2_MPI::Error("Cannot write primitive pressure surface table",CURRENT_FUNCTION);
+    pressure<<std::setprecision(17)<<"marker,node,x,y,p,Cp,nx,ny\n";
+    for (const auto& f:aero.surface)
+      pressure<<std::quoted(c->GetMarker_All_TagBound(f.marker))<<','<<g->nodes->GetGlobalIndex(f.node)<<','
+              <<f.point[0]<<','<<f.point[1]<<','<<f.pressure<<','<<f.cp<<','<<f.normal[0]<<','<<f.normal[1]<<'\n';
+    pressure.close();
+    if (!pressure) SU2_MPI::Error("Failed writing primitive pressure surface table",CURRENT_FUNCTION);
+    lastPressureOutput=c->GetTimeIter();
+  }
   if (c->GetPrimitiveGeometryAudit().empty() || c->GetTimeIter()!=0) return;
   const auto& metrics=static_cast<CPrimitiveEulerSolver*>(solvers[FLOW_SOL])->GetGeometryMetrics();
   std::ofstream file(c->GetPrimitiveGeometryAudit());

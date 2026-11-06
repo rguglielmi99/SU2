@@ -42,6 +42,21 @@ class CPrimitiveEulerSolver final : public CSolver {
 
   using State = PrimitiveEuler2D::State;
   using Direction = PrimitiveEuler2D::Direction;
+  struct PressureSample {
+    unsigned short marker;
+    unsigned long node;
+    Direction point, normal;
+    double pressure, cp;
+  };
+  struct AerodynamicResult {
+    bool enabled = false;  // No MARKER_MONITORING: no aerodynamic normalization required.
+    Direction force{};
+    double dynamicPressure = 0, cl = 0, cd = 0;
+    std::vector<PressureSample> surface;
+  };
+  // Refreshes the existing reconstruction for CURRENT W; leaves W, time and LinSysRes unchanged.
+  // Pressure integration only: does not validate/modify slip constraints or activate weak TEs.
+  AerodynamicResult ComputeAerodynamics(CGeometry*, const CConfig*);
   // Boundary data are exterior primitive states at the actual half-edge midpoint.
   using BoundaryState = std::function<State(const Direction&, double, const State&, const Direction&, unsigned short)>;
   // NODE source values are sampled at primal nodes, not dual centroids.

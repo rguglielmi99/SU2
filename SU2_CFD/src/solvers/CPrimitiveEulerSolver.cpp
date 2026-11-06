@@ -7,8 +7,10 @@
 #include "../../include/gradients/computeGradientsGreenGauss.hpp"
 #include "../../include/gradients/computeGradientsLeastSquares.hpp"
 #include "../../include/limiters/computeLimiters.hpp"
+#include "../../include/iteration/primitive_euler_boundary_config.hpp"
 #include <limits>
 #include <map>
+#include <set>
 
 namespace {
 struct PrimitiveEvaluationGuard {
@@ -31,6 +33,55 @@ double PrimitiveFaceSpeed(const PrimitiveEuler2D::State& left, const PrimitiveEu
   if (!std::isfinite(speed) || speed <= 0) throw std::invalid_argument("Invalid primitive characteristic speed");
   return speed;
 }
+}
+
+CPrimitiveEulerSolver::AerodynamicResult CPrimitiveEulerSolver::ComputeAerodynamics(
+    CGeometry* geometry, const CConfig* config) {
+  PrimitiveEvaluationGuard guard(evaluating);
+  if (geometry != originalGeometry || config != originalConfig)
+    throw std::invalid_argument("Aerodynamics requires the original primitive geometry/config");
+  AerodynamicResult result;
+  if (config->GetnMarker_Monitoring() == 0) return result;
+  std::set<unsigned short> selected;
+  for (unsigned short k=0;k<config->GetnMarker_Monitoring();++k) {
+    const auto tag=config->GetMarker_Monitoring_TagBound(k);
+    bool found=false;
+    for (unsigned short m=0;m<geometry->GetnMarker();++m) {
+      if (config->GetMarker_All_TagBound(m)!=tag) continue;
+      if (config->GetMarker_All_KindBC(m)!=EULER_WALL)
+        throw std::invalid_argument("Primitive MARKER_MONITORING requires only MARKER_EULER walls: "+tag);
+      if (!selected.insert(m).second)
+        throw std::invalid_argument("Duplicate primitive aerodynamic marker: "+tag);
+      found=true;
+    }
+    if (!found) throw std::invalid_argument("Missing primitive aerodynamic marker: "+tag);
+  }
+  if (config->GetRef_NonDim()!=DIMENSIONAL)
+    throw std::invalid_argument("Primitive aerodynamics requires DIMENSIONAL reference scales");
+  const auto free=PrimitiveEulerBoundaryConfig::Freestream(*config);
+  const double q=0.5*free[0]*(free[1]*free[1]+free[2]*free[2]);
+  const double area=SU2_TYPE::GetValue(config->GetRefArea());
+  const double alpha=SU2_TYPE::GetValue(config->GetAoA())*PI_NUMBER/180;
+  if (!std::isfinite(q) || q<=0 || !std::isfinite(area) || area<=0 ||
+      !std::isfinite(q*area) || q*area<=0 || !std::isfinite(alpha))
+    throw std::invalid_argument("Primitive aerodynamics requires positive finite q_inf and REF_AREA");
+  PrepareReconstruction(*geometry,*config);
+  result.enabled=true;
+  result.dynamicPressure=q;
+  for (const auto& f:metrics->GetBoundaryFaces()) {
+    if (!selected.count(f.marker)) continue;
+    const double p=ReconstructAt(f.node,f.point)[3];
+    const double cp=(p-free[3])/q;
+    if (!std::isfinite(cp)) throw std::invalid_argument("Nonfinite primitive pressure coefficient");
+    result.surface.push_back({f.marker,f.node,f.point,f.normal,p,cp});
+    for (unsigned d=0;d<2;++d) result.force[d]+=(p-free[3])*f.normal[d];
+  }
+  if (result.surface.empty()) throw std::invalid_argument("No monitored primitive wall half-faces");
+  result.cd=(result.force[0]*std::cos(alpha)+result.force[1]*std::sin(alpha))/(q*area);
+  result.cl=(-result.force[0]*std::sin(alpha)+result.force[1]*std::cos(alpha))/(q*area);
+  if (!std::isfinite(result.cl) || !std::isfinite(result.cd))
+    throw std::invalid_argument("Nonfinite primitive force coefficients");
+  return result;
 }
 
 void CPrimitiveEulerSolver::ValidateConfiguration(const CConfig& config) {

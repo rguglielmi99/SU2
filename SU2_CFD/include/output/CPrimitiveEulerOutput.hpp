@@ -7,6 +7,7 @@
 #include "CFVMOutput.hpp"
 
 class CPrimitiveEulerOutput final : public CFVMOutput {
+  unsigned long lastPressureOutput = std::numeric_limits<unsigned long>::max();
  public:
   CPrimitiveEulerOutput(CConfig*, unsigned short);
   void SetHistoryOutputFields(CConfig*) override;

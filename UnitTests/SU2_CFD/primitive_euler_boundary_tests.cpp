@@ -15,6 +15,71 @@
 
 using namespace PrimitiveEuler2D;
 using namespace PrimitiveEulerTest;
+
+TEST_CASE("Primitive pressure forces integrate closed bodies at half-face quadrature points", "[primitive-aerodynamics]") {
+  const std::vector<Direction> xy{{{-1,-1}},{{2,-1}},{{2,2}},{{-1,2}},{{0,0}},{{1,0}},{{1,1}},{{0,1}}};
+  const std::vector<Triangle> cells{{{0,1,5}},{{0,5,4}},{{1,2,6}},{{1,6,5}},
+                                   {{2,3,7}},{{2,7,6}},{{3,0,4}},{{3,4,7}}};
+  const std::string options="TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n"
+      "MUSCL_FLOW=YES\nNUM_METHOD_GRAD_RECON=WEIGHTED_LEAST_SQUARES\nSLOPE_LIMITER_FLOW=NONE\n"
+      "MARKER_EULER=(body_a,body_b)\nMARKER_CUSTOM=(outer)\nFLUID_MODEL=IDEAL_GAS\nGAMMA_VALUE=1.4\n"
+      "GAS_CONSTANT=1\nREF_DIMENSIONALIZATION=DIMENSIONAL\nFREESTREAM_OPTION=DENSITY_FS\n"
+      "FREESTREAM_DENSITY=1\nFREESTREAM_PRESSURE=1\nMACH_NUMBER=0.3380617018914066\nAOA=30\nREF_AREA=2\n";
+  const std::vector<BoundaryMarker> markers{{"outer",{{{0,1}},{{1,2}},{{2,3}},{{3,0}}}},
+      {"body_a",{{{4,5}},{{5,6}}}},{"body_b",{{{6,7}},{{7,4}}}}};
+  for (bool reverse:{false,true}) {
+    auto ordered=markers;
+    if (reverse) for (auto& marker:ordered) std::reverse(marker.edges.begin(),marker.edges.end());
+    MeshFixture f(xy,cells,"PRIMITIVE_EULER",options+"MARKER_MONITORING=(body_a,body_b)\n","",ordered,reverse);
+    CPrimitiveEulerSolver solver(f.geometry.get(),f.config.get(),0);
+    for (bool affine:{false,true}) {
+      for (unsigned long i=0;i<xy.size();++i)
+        solver.GetPrimitiveNodes().SetPrimitiveState(i,{{1,0,0,2+(affine?.2*xy[i][0]-.1*xy[i][1]:0)}});
+      solver.LinSysRes(0,0)=7;
+      const auto a=solver.ComputeAerodynamics(f.geometry.get(),f.config.get());
+      REQUIRE(a.enabled); REQUIRE(a.surface.size()==8);
+      CHECK(a.dynamicPressure==Approx(.08).margin(1e-14));
+      Direction manual{},closure{};
+      std::set<std::tuple<unsigned short,unsigned long,double,double>> coverage;
+      for (const auto& s:a.surface) {
+        CHECK(f.config->GetMarker_All_TagBound(s.marker)!="outer");
+        CHECK(coverage.insert({s.marker,s.node,s.point[0],s.point[1]}).second);
+        const double p=2+(affine?.2*s.point[0]-.1*s.point[1]:0);
+        CHECK(s.pressure==Approx(p).margin(2e-13));
+        CHECK(s.cp==Approx((p-1)/.08).margin(3e-12));
+        // Inward toward the body centre, opposite its outward normal.
+        CHECK(s.normal[0]*(s.point[0]-.5)+s.normal[1]*(s.point[1]-.5)<0);
+        for (unsigned d=0;d<2;++d) { manual[d]+=(p-1)*s.normal[d]; closure[d]+=s.normal[d]; }
+      }
+      const double fx=affine?-.2:0,fy=affine?.1:0;
+      for (unsigned d=0;d<2;++d) {
+        CHECK(closure[d]==Approx(0).margin(1e-14));
+        CHECK(a.force[d]==Approx(manual[d]).margin(2e-13));
+      }
+      CHECK(a.force[0]==Approx(fx).margin(2e-13)); CHECK(a.force[1]==Approx(fy).margin(2e-13));
+      CHECK(a.cd==Approx((fx*std::sqrt(3.)/2+fy*.5)/.16).margin(3e-12));
+      CHECK(a.cl==Approx((-fx*.5+fy*std::sqrt(3.)/2)/.16).margin(3e-12));
+      CHECK(solver.LinSysRes(0,0)==7); CHECK(solver.GetPhysicalTime()==0);
+    }
+  }
+  MeshFixture absent(xy,cells,"PRIMITIVE_EULER",options,"",markers);
+  CPrimitiveEulerSolver noSelection(absent.geometry.get(),absent.config.get(),0);
+  CHECK_FALSE(noSelection.ComputeAerodynamics(absent.geometry.get(),absent.config.get()).enabled);
+  for (const std::string extra:{"MARKER_MONITORING=(outer)\n","MARKER_MONITORING=(body_a,body_a)\n",
+       "MARKER_MONITORING=(body_a)\nREF_AREA=0\n","MARKER_MONITORING=(body_a)\nREF_AREA=-1\n",
+       "MARKER_MONITORING=(body_a)\nMACH_NUMBER=0\n"}) {
+    // Replace rather than repeat REF_AREA in the invalid-reference case.
+    auto settings=options;
+    if (extra.find("REF_AREA")!=std::string::npos) settings.erase(settings.find("REF_AREA=2\n"));
+    if (extra.find("MACH_NUMBER")!=std::string::npos) {
+      const auto start=settings.find("MACH_NUMBER=");
+      settings.erase(start,settings.find('\n',start)-start+1);
+    }
+    MeshFixture bad(xy,cells,"PRIMITIVE_EULER",settings+extra,"",markers);
+    CPrimitiveEulerSolver s(bad.geometry.get(),bad.config.get(),0);
+    CHECK_THROWS_AS(s.ComputeAerodynamics(bad.geometry.get(),bad.config.get()),std::invalid_argument);
+  }
+}
 namespace {
 constexpr double gasGamma=1.4;
 auto Precise(double value) { return Approx(value).epsilon(64*std::numeric_limits<double>::epsilon()).margin(2e-13); }
@@ -106,7 +171,7 @@ TEST_CASE("Explicit per-instance weak NACA tip keeps local face BCs and evolves 
     QuietGeometryOutput quiet;
     std::stringstream text;
     text << "SOLVER=PRIMITIVE_EULER\nMGLEVEL=0\nMESH_FILENAME=" << path.string() << "\n"
-         << "MARKER_EULER=(airfoil)\nMARKER_FAR=(farfield)\nTIME_DISCRE_FLOW=EULER_EXPLICIT\n"
+         << "MARKER_EULER=(airfoil)\nMARKER_MONITORING=(airfoil)\nMARKER_FAR=(farfield)\nTIME_DISCRE_FLOW=EULER_EXPLICIT\n"
          << "CONV_NUM_METHOD_FLOW=ROE\nFLUID_MODEL=IDEAL_GAS\nGAMMA_VALUE=1.4\nGAS_CONSTANT=1\n"
          << "REF_DIMENSIONALIZATION=DIMENSIONAL\nFREESTREAM_OPTION=DENSITY_FS\nINIT_OPTION=TD_CONDITIONS\n"
          << "FREESTREAM_DENSITY=1\nFREESTREAM_PRESSURE=1\nAOA=0\nMACH_NUMBER=" << std::setprecision(17) << .4/std::sqrt(1.4) << "\n"
@@ -132,6 +197,20 @@ TEST_CASE("Explicit per-instance weak NACA tip keeps local face BCs and evolves 
   REQUIRE(tip<g->GetnPoint()); REQUIRE(g->nodes->GetVertex(tip,wall)>=0);
   REQUIRE(g->nodes->GetCoord(tip,0)==Precise(1)); REQUIRE(g->nodes->GetCoord(tip,1)==Precise(0));
   CPrimitiveEulerSolver strong(g.get(),c.get(),0);
+  // Pure pressure diagnostic: requires neither a wall projection nor TE authorization.
+  for (unsigned long i=0;i<g->GetnPoint();++i) strong.GetPrimitiveNodes().SetPrimitiveState(i,{{1,.4,0,2}});
+  const auto aero=strong.ComputeAerodynamics(g.get(),c.get());
+  REQUIRE(aero.surface.size()==400);
+  unsigned tipSamples=0;
+  for (const auto& sample:aero.surface) {
+    CHECK(sample.marker==wall);
+    CHECK(sample.cp==Approx(12.5).margin(2e-12));
+    tipSamples+=sample.node==tip;
+  }
+  CHECK(tipSamples==2);
+  CHECK(aero.force[0]==Approx(0).margin(2e-13));
+  CHECK(aero.force[1]==Approx(0).margin(2e-13));
+  for (unsigned long i=0;i<g->GetnPoint();++i) strong.GetPrimitiveNodes().SetPrimitiveState(i,{{1,.4,0,1}});
   std::vector<CAggregatedGeometry::BoundaryFace> faces;
   for (const auto& f:strong.GetGeometryMetrics().GetBoundaryFaces()) if (f.node==tip) faces.push_back(f);
   REQUIRE(faces.size()==2); REQUIRE(faces[0].marker==wall); REQUIRE(faces[1].marker==wall);
