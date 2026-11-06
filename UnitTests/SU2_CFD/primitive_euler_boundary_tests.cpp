@@ -7,6 +7,9 @@
 #include "primitive_euler_mesh_fixture.hpp"
 #include "../../SU2_CFD/include/solvers/CPrimitiveEulerSolver.hpp"
 #include "../../SU2_CFD/include/numerics/flow/primitive_euler_boundary.hpp"
+#include "../../SU2_CFD/include/gradients/computeGradientsLeastSquares.hpp"
+#include "../../SU2_CFD/include/gradients/computeGradientsGreenGauss.hpp"
+#include <set>
 
 using namespace PrimitiveEuler2D;
 using namespace PrimitiveEulerTest;
@@ -19,6 +22,270 @@ void Same(const State& a,const State& b,double tolerance=2e-12) {
 State Oriented(double un,double ut,const Direction& n) { return {{1,un*n[0]-ut*n[1],un*n[1]+ut*n[0],1}}; }
 double Plus(const State& w,const Direction& n) { return Boundary::NormalVelocity(w,n)+2*Boundary::Sound(w,gasGamma)/.4; }
 double Minus(const State& w,const Direction& n) { return Boundary::NormalVelocity(w,n)-2*Boundary::Sound(w,gasGamma)/.4; }
+}
+
+namespace {
+// Phase 11: uniformly refine a hexagonal fan; only new boundary vertices
+// are projected onto the circle. No manufactured forcing or boundary callback.
+struct RotatingDisk {
+  std::vector<Direction> xy{{{0,0}}};
+  std::vector<Triangle> cells;
+  std::set<std::pair<unsigned long,unsigned long>> boundary;
+  explicit RotatingDisk(unsigned levels) {
+    const double pi=std::acos(-1.);
+    for (unsigned k=0;k<6;++k) xy.push_back({{std::cos(k*pi/3),std::sin(k*pi/3)}});
+    for (unsigned k=0;k<6;++k) {
+      const unsigned long a=k+1,b=(k+1)%6+1;
+      cells.push_back({{0,a,b}}); boundary.insert(std::minmax(a,b));
+    }
+    for (unsigned level=0;level<levels;++level) {
+      std::map<std::pair<unsigned long,unsigned long>,unsigned long> midpoints;
+      std::set<std::pair<unsigned long,unsigned long>> nextBoundary;
+      const auto midpoint=[&](unsigned long a,unsigned long b) {
+        const auto key=std::make_pair(std::min(a,b),std::max(a,b));
+        const auto old=midpoints.find(key);
+        if (old!=midpoints.end()) return old->second;
+        Direction q{{.5*(xy[a][0]+xy[b][0]),.5*(xy[a][1]+xy[b][1])}};
+        const auto node=static_cast<unsigned long>(xy.size());
+        if (boundary.count(key)) {
+          const double r=std::hypot(q[0],q[1]); for (auto& v:q) v/=r;
+          nextBoundary.insert(std::minmax(a,node)); nextBoundary.insert(std::minmax(node,b));
+        }
+        xy.push_back(q); midpoints.emplace(key,node); return node;
+      };
+      std::vector<Triangle> next;
+      for (const auto& t:cells) {
+        const auto a=midpoint(t[0],t[1]),b=midpoint(t[1],t[2]),c=midpoint(t[2],t[0]);
+        next.push_back({{t[0],a,c}}); next.push_back({{a,t[1],b}});
+        next.push_back({{c,b,t[2]}}); next.push_back({{a,b,c}});
+      }
+      cells=std::move(next); boundary=std::move(nextBoundary);
+    }
+    for (const auto& t:cells) {
+      const auto& a=xy[t[0]]; const auto& b=xy[t[1]]; const auto& c=xy[t[2]];
+      REQUIRE((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])>0);
+    }
+  }
+  double h() const {
+    double value=0;
+    for (const auto& t:cells) for (unsigned k=0;k<3;++k)
+      value=std::max(value,std::hypot(xy[t[k]][0]-xy[t[(k+1)%3]][0],xy[t[k]][1]-xy[t[(k+1)%3]][1]));
+    return value;
+  }
+};
+State RotatingExact(const Direction& x) { return {{1,-.2*x[1],.2*x[0],1+.02*(x[0]*x[0]+x[1]*x[1])}}; }
+const std::string diskOptions="TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n"
+    "MUSCL_FLOW=YES\nNUM_METHOD_GRAD_RECON=WEIGHTED_LEAST_SQUARES\nSLOPE_LIMITER_FLOW=NONE\n"
+    "PRIMITIVE_VOLUME_QUADRATURE=NODE_POINT\n";
+void InitializeDisk(CPrimitiveEulerSolver& s,const RotatingDisk& grid) {
+  for (unsigned long i=0;i<grid.xy.size();++i) {
+    const auto& x=grid.xy[i];
+    const Gradient g{{{{0,0}},{{0,-.2}},{{.2,0}},{{.04*x[0],.04*x[1]}}}};
+    for (auto value:VolumeProduct(RotatingExact(x),g,1.4)) CHECK(value==Approx(0).margin(2e-17));
+    s.GetPrimitiveNodes().SetPrimitiveState(i,RotatingExact(x));
+  }
+}
+struct DiskMeasure {
+  std::array<State,3> rhs{},error{}; // all, wall, interior: volume-normalized RMS.
+  double slip=0,trace=0,minRho=1e300,minP=1e300,minTangent=1e300;
+  double wallVelocityGradientError=0,wallPressureNormalError=0;
+  double total() const { double r=0; for (auto v:rhs[0]) r+=v*v; return std::sqrt(r); }
+};
+DiskMeasure MeasureDisk(CPrimitiveEulerSolver& s,const RotatingDisk& grid,
+                        const CPrimitiveEulerSolver::SpatialResult& result) {
+  DiskMeasure m;
+  std::vector<Direction> normal(grid.xy.size());
+  for (const auto& f:s.GetGeometryMetrics().GetBoundaryFaces()) {
+    for (unsigned d=0;d<2;++d) normal[f.node][d]+=f.normal[d];
+    const auto trace=s.ReconstructAt(f.node,f.point);
+    m.trace=std::max(m.trace,std::abs(trace[1]*f.normal[0]+trace[2]*f.normal[1])/std::hypot(f.normal[0],f.normal[1]));
+  }
+  std::array<double,3> weight{};
+  for (unsigned long i=0;i<grid.xy.size();++i) {
+    const auto w=s.GetPrimitiveNodes().GetPrimitiveState(i),exact=RotatingExact(grid.xy[i]);
+    const double area=s.GetGeometryMetrics().GetCell(i).volume, length=std::hypot(normal[i][0],normal[i][1]);
+    const unsigned region=length>0?1:2;
+    for (unsigned group:{0u,region}) {
+      weight[group]+=area;
+      for (unsigned k=0;k<4;++k) {
+        REQUIRE(std::isfinite(result.rhs[i][k]));
+        m.rhs[group][k]+=area*result.rhs[i][k]*result.rhs[i][k];
+        m.error[group][k]+=area*(w[k]-exact[k])*(w[k]-exact[k]);
+      }
+    }
+    REQUIRE(w[0]>0); REQUIRE(w[3]>0);
+    m.minRho=std::min(m.minRho,w[0]); m.minP=std::min(m.minP,w[3]);
+    if (length>0) {
+      m.slip=std::max(m.slip,std::abs(w[1]*normal[i][0]+w[2]*normal[i][1])/length);
+      m.minTangent=std::min(m.minTangent,std::abs(-w[1]*normal[i][1]+w[2]*normal[i][0])/length);
+      const auto& gradient=s.GetLimitedGradient(i);
+      const double gradientError=gradient[1][0]*gradient[1][0]+std::pow(gradient[1][1]+.2,2)+
+          std::pow(gradient[2][0]-.2,2)+gradient[2][1]*gradient[2][1];
+      m.wallVelocityGradientError=std::max(m.wallVelocityGradientError,std::sqrt(gradientError));
+      const double normalError=((gradient[3][0]-.04*grid.xy[i][0])*normal[i][0]+
+                                (gradient[3][1]-.04*grid.xy[i][1])*normal[i][1])/length;
+      m.wallPressureNormalError=std::max(m.wallPressureNormalError,std::abs(normalError));
+    }
+  }
+  CHECK(m.slip<2e-13);
+  for (unsigned group=0;group<3;++group) for (unsigned k=0;k<4;++k) {
+    m.rhs[group][k]=std::sqrt(m.rhs[group][k]/weight[group]);
+    m.error[group][k]=std::sqrt(m.error[group][k]/weight[group]);
+  }
+  return m;
+}
+void PrintDisk(const char* kind,const RotatingDisk& grid,unsigned step,double time,double dt,const DiskMeasure& m) {
+  const std::array<const char*,3> regions{{"all","wall","interior"}};
+  for (unsigned group=0;group<3;++group) {
+    std::cout << std::setprecision(16) << "CURVED_WALL," << kind << ',' << grid.boundary.size() << ','
+              << grid.xy.size() << ',' << grid.h() << ',' << step << ',' << time << ',' << dt << ',' << regions[group];
+    for (auto value:m.rhs[group]) std::cout << ',' << value;
+    for (auto value:m.error[group]) std::cout << ',' << value;
+    std::cout << ',' << m.total() << ',' << m.slip << ',' << m.trace << ',' << m.minRho << ',' << m.minP << ',' << m.minTangent
+              << ',' << m.wallVelocityGradientError << ',' << m.wallPressureNormalError << '\n';
+  }
+}
+}
+
+TEST_CASE("Rotating disk measures curved-wall spatial consistency without an imposed order", "[primitive-curved-wall]") {
+  std::cout << "CURVED_WALL,kind,segments,nodes,h,step,time,dt,region,rhs_rho,rhs_u,rhs_v,rhs_p,error_rho,error_u,error_v,error_p,rhs_total,slip,trace_normal,min_rho,min_p,min_tangent,wall_grad_velocity_error,wall_grad_p_normal_error\n";
+  for (unsigned level:{1u,2u,3u}) {
+    RotatingDisk grid(level);
+    MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",diskOptions,"MARKER_EULER");
+    CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0); InitializeDisk(s,grid);
+    const auto result=s.ComputeSpatialResidual(f.geometry.get(),f.config.get());
+    const auto m=MeasureDisk(s,grid,result);
+    CHECK(m.minTangent==Approx(.2).margin(2e-14));
+    PrintDisk("spatial",grid,0,0,0,m);
+  }
+}
+
+TEST_CASE("Primitive LS and WLS recover wall rotation without flat symmetry corrections", "[primitive-wall-gradients]") {
+  for (const std::string method:{"LEAST_SQUARES","WEIGHTED_LEAST_SQUARES"}) {
+    double previous=1e300;
+    for (unsigned level:{1u,2u,3u}) {
+      RotatingDisk grid(level);
+      auto options=diskOptions;
+      options.replace(options.find("WEIGHTED_LEAST_SQUARES"),std::string("WEIGHTED_LEAST_SQUARES").size(),method);
+      MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",options,"MARKER_EULER");
+      CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0); InitializeDisk(s,grid);
+      const auto result=s.ComputeSpatialResidual(f.geometry.get(),f.config.get());
+      const auto m=MeasureDisk(s,grid,result);
+      CHECK(m.wallVelocityGradientError<2e-12);
+      CHECK(m.wallPressureNormalError<previous);
+      previous=m.wallPressureNormalError;
+      for (unsigned long v=0;v<f.geometry->GetnVertex(0);++v) {
+        const auto i=f.geometry->vertex[0][v]->GetNode();
+        const auto& g=s.GetLimitedGradient(i);
+        const double normalPressure=g[3][0]*grid.xy[i][0]+g[3][1]*grid.xy[i][1];
+        CHECK(normalPressure>.005); // Nonzero, not assumed exact for quadratic p.
+      }
+      std::cout << std::setprecision(16) << "WALL_GRADIENT," << method << ',' << grid.boundary.size()
+                << ',' << m.wallVelocityGradientError << ',' << m.wallPressureNormalError << '\n';
+    }
+  }
+}
+
+TEST_CASE("Euler shear survives while true symmetry and generic default retain correction", "[primitive-wall-gradients]") {
+  const std::vector<Direction> xy{{{0,0}},{{2,0}},{{2,1}},{{0,1}},{{.8,.3}}};
+  const std::vector<Triangle> cells{{{0,1,4}},{{1,2,4}},{{2,3,4}},{{3,0,4}}};
+  const std::vector<BoundaryMarker> markers{{"wall",{{{0,1}}}},{"open",{{{1,2}},{{2,3}},{{3,0}}}}};
+  for (const std::string method:{"LEAST_SQUARES","WEIGHTED_LEAST_SQUARES","GREEN_GAUSS"})
+   for (const std::string kind:{"MARKER_EULER","MARKER_SYM"}) {
+    INFO(method << " " << kind);
+    const std::string options="TIME_DISCRE_FLOW=EULER_EXPLICIT\nCONV_NUM_METHOD_FLOW=ROE\n"
+        "MUSCL_FLOW=YES\nSLOPE_LIMITER_FLOW=NONE\nNUM_METHOD_GRAD_RECON="+method+"\n"+kind+"=(wall)\nMARKER_CUSTOM=(open)\n";
+    MeshFixture f(xy,cells,"PRIMITIVE_EULER",options,"",markers);
+    CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0);
+    for (unsigned i=0;i<xy.size();++i) s.GetPrimitiveNodes().SetPrimitiveState(i,{{1+.1*xy[i][1],.4+.3*xy[i][1],0,1+.2*xy[i][1]}});
+    const CPrimitiveEulerSolver::BoundaryState extrapolate=[](const Direction&,double,const State& w,const Direction&,unsigned short){return w;};
+    s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),0,extrapolate);
+    auto& field=s.GetPrimitiveNodes(); auto& gradient=field.GetGradient_Reconstruction();
+    const auto compute=[&](bool legacyDefault) {
+      if (method=="GREEN_GAUSS") {
+        if (legacyDefault) computeGradientsGreenGauss(nullptr,MPI_QUANTITIES::SOLUTION_GRAD_REC,PERIODIC_NONE,
+            *f.geometry,*f.config,field.GetSolution(),0,4,1,gradient);
+        else computeGradientsGreenGauss(nullptr,MPI_QUANTITIES::SOLUTION_GRAD_REC,PERIODIC_NONE,
+            *f.geometry,*f.config,field.GetSolution(),0,4,1,gradient,false);
+      } else {
+        if (legacyDefault) computeGradientsLeastSquares(nullptr,MPI_QUANTITIES::SOLUTION_GRAD_REC,PERIODIC_NONE,
+            *f.geometry,*f.config,method=="WEIGHTED_LEAST_SQUARES",field.GetSolution(),0,4,1,gradient,field.GetRmatrix());
+        else computeGradientsLeastSquares(nullptr,MPI_QUANTITIES::SOLUTION_GRAD_REC,PERIODIC_NONE,
+            *f.geometry,*f.config,method=="WEIGHTED_LEAST_SQUARES",field.GetSolution(),0,4,1,gradient,field.GetRmatrix(),false);
+      }
+    };
+    compute(false);
+    for (unsigned i:{0u,1u}) {
+      for (unsigned k=0;k<4;++k) for (unsigned d=0;d<2;++d)
+        CHECK(s.GetLimitedGradient(i)[k][d]==Precise(SU2_TYPE::GetValue(gradient(i,k,d))));
+      if (kind=="MARKER_SYM") CHECK(s.GetLimitedGradient(i)[1][1]==Precise(0));
+      else {
+        CHECK(s.GetLimitedGradient(i)[1][1]>.05);
+        if (method!="GREEN_GAUSS") CHECK(s.GetLimitedGradient(i)[1][1]==Precise(.3));
+      }
+    }
+    // Omit the optional argument, exactly as unchanged native call sites do.
+    compute(true);
+    for (unsigned i:{0u,1u}) {
+      CHECK(gradient(i,1,1)==Precise(0));
+      CHECK(gradient(i,3,1)==Precise(0));
+    }
+   }
+}
+
+TEST_CASE("Rotating disk separates short evolution from Forward Euler time sensitivity", "[primitive-curved-wall]") {
+  for (unsigned level:{1u,2u}) {
+   std::vector<State> coarse;
+   for (unsigned divisor:{1u,2u}) {
+    RotatingDisk grid(level);
+    MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",diskOptions,"MARKER_EULER");
+    CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0); InitializeDisk(s,grid);
+    const unsigned steps=divisor*static_cast<unsigned>(std::ceil(.1/s.EstimateTimeStep(f.geometry.get(),f.config.get(),0,.05)));
+    const double dt=.1/steps;
+    for (unsigned step=0;step<=steps;++step) {
+      if (step==0 || step==steps/2 || step==steps) {
+        const auto result=s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),step*dt);
+        PrintDisk(divisor==1?"evolve":"half_dt",grid,step,step*dt,dt,MeasureDisk(s,grid,result));
+      }
+      if (step<steps) s.AdvanceExplicitEuler(f.geometry.get(),f.config.get(),step*dt,dt);
+    }
+    if (divisor==1) {
+      for (unsigned long i=0;i<grid.xy.size();++i) coarse.push_back(s.GetPrimitiveNodes().GetPrimitiveState(i));
+    } else {
+      const auto result=s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),.1);
+      auto difference=MeasureDisk(s,grid,result);
+      difference.error={};
+      std::array<double,3> weight{};
+      std::set<unsigned long> wall;
+      for (const auto& edge:grid.boundary) { wall.insert(edge.first); wall.insert(edge.second); }
+      for (unsigned long i=0;i<grid.xy.size();++i) {
+        const auto w=s.GetPrimitiveNodes().GetPrimitiveState(i);
+        const double volume=s.GetGeometryMetrics().GetCell(i).volume;
+        for (unsigned group:{0u,wall.count(i)?1u:2u}) {
+          weight[group]+=volume;
+          for (unsigned k=0;k<4;++k) difference.error[group][k]+=volume*(w[k]-coarse[i][k])*(w[k]-coarse[i][k]);
+        }
+      }
+      for (unsigned group=0;group<3;++group) for (unsigned k=0;k<4;++k)
+        difference.error[group][k]=std::sqrt(difference.error[group][k]/weight[group]);
+      PrintDisk("dt_difference",grid,steps,.1,dt,difference);
+    }
+   }
+  }
+}
+
+TEST_CASE("Rotating disk monitors a bounded global explicit pseudo-time experiment", "[primitive-curved-wall]") {
+  RotatingDisk grid(1);
+  MeshFixture f(grid.xy,grid.cells,"PRIMITIVE_EULER",diskOptions,"MARKER_EULER");
+  CPrimitiveEulerSolver s(f.geometry.get(),f.config.get(),0); InitializeDisk(s,grid);
+  const double dt=s.EstimateTimeStep(f.geometry.get(),f.config.get(),0,.05);
+  for (unsigned step=0;step<=250;++step) {
+    if (step==0 || step==10 || step==50 || step==100 || step==150 || step==200 || step==250) {
+      const auto result=s.ComputeSpatialResidual(f.geometry.get(),f.config.get(),step*dt);
+      PrintDisk("relax",grid,step,step*dt,dt,MeasureDisk(s,grid,result));
+    }
+    if (step<250) s.AdvanceExplicitEuler(f.geometry.get(),f.config.get(),step*dt,dt);
+  }
 }
 
 TEST_CASE("Slip reflection preserves thermodynamics and tangential velocity under rotation", "[primitive-boundary]") {

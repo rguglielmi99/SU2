@@ -102,16 +102,18 @@ inline void correctGradient(const size_t varBegin, const size_t varEnd, const in
  * \param[in] varEnd - Index of last variable for which to compute the gradient.
  * \param[in] idxVel - Index to velocity, -1 if no velocity is present in the solver.
  * \param[in,out] gradient - Generic object implementing operator (iPoint, iVar, iDim).
+ * \param[in] correctEulerWalls - Also apply flat symmetry corrections to Euler walls (legacy default).
  */
 template <size_t nDim, class GradientType>
 void correctGradientsSymmetry(CGeometry& geometry, const CConfig& config, const size_t varBegin,
-                              const size_t varEnd, const int idxVel, GradientType& gradient) {
+                              const size_t varEnd, const int idxVel, GradientType& gradient,
+                              const bool correctEulerWalls = true) {
 
   /*--- Check how many symmetry planes there are. ---*/
   std::vector<unsigned short> symMarkers;
   for (auto iMarker = 0u; iMarker < geometry.GetnMarker(); ++iMarker) {
     if (config.GetMarker_All_KindBC(iMarker) == SYMMETRY_PLANE ||
-        config.GetMarker_All_KindBC(iMarker) == EULER_WALL) {
+        (correctEulerWalls && config.GetMarker_All_KindBC(iMarker) == EULER_WALL)) {
       symMarkers.push_back(iMarker);
     }
   }

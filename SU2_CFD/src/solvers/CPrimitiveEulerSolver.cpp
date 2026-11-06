@@ -99,15 +99,17 @@ void CPrimitiveEulerSolver::PrepareReconstruction(CGeometry& geometry, const CCo
   if (config.GetMUSCL_Flow()) {
     // Use the reconstruction method for BOTH faces and volume, even when the
     // separate generic gradient method differs. No flow-layout assumptions.
+    // Slip constrains nodal velocity, not flat-symmetry derivatives: retain
+    // Euler-wall gradients while preserving corrections on true SYMMETRY_PLANE.
     const auto method = config.GetKind_Gradient_Method_Recon();
     if (method == GREEN_GAUSS) {
       computeGradientsGreenGauss(nullptr, MPI_QUANTITIES::SOLUTION_GRAD_REC, PERIODIC_NONE,
-                                geometry, config, nodes->GetSolution(), 0, 4, 1, raw);
+                                geometry, config, nodes->GetSolution(), 0, 4, 1, raw, false);
     } else if (method == LEAST_SQUARES || method == WEIGHTED_LEAST_SQUARES) {
       if (nodes->GetRmatrix().length() != nPoint)
         throw std::invalid_argument("Primitive reconstruction requires allocated least-squares storage");
       computeGradientsLeastSquares(nullptr, MPI_QUANTITIES::SOLUTION_GRAD_REC, PERIODIC_NONE,
-          geometry, config, method == WEIGHTED_LEAST_SQUARES, nodes->GetSolution(), 0, 4, 1, raw, nodes->GetRmatrix());
+          geometry, config, method == WEIGHTED_LEAST_SQUARES, nodes->GetSolution(), 0, 4, 1, raw, nodes->GetRmatrix(), false);
     } else {
       throw std::invalid_argument("Unsupported primitive reconstruction gradient method");
     }
