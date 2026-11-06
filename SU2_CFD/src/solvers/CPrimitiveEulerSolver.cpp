@@ -56,7 +56,8 @@ void CPrimitiveEulerSolver::ValidateConfiguration(const CConfig& config) {
 
 }
 
-CPrimitiveEulerSolver::CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh)
+CPrimitiveEulerSolver::CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh,
+                                             const std::vector<unsigned long>& weakTrailingEdgeNodes)
     : CSolver(), originalGeometry(geometry), originalConfig(config) {
   if (!geometry || !config || mesh != MESH_0) throw std::invalid_argument("Invalid primitive Euler solver setup");
   ValidateConfiguration(*config);
@@ -69,6 +70,8 @@ CPrimitiveEulerSolver::CPrimitiveEulerSolver(CGeometry* geometry, CConfig* confi
   nPoint = geometry->GetnPoint();
   nPointDomain = geometry->GetnPointDomain();
   nMarker = geometry->GetnMarker();
+  weakTrailingEdge.assign(nPoint,false);
+  ValidateWeakTrailingEdges(weakTrailingEdgeNodes);
   SolverName = "PRIMITIVE_EULER";
   Residual_RMS.resize(nVar, 0.0);
   Residual_Max.resize(nVar, 0.0);
@@ -168,12 +171,67 @@ CPrimitiveEulerSolver::State CPrimitiveEulerSolver::ReconstructAt(unsigned long 
   return result;
 }
 
+double CPrimitiveEulerSolver::SlipFluidAngle(unsigned long node) const {
+  double angle=0; unsigned triangles=0;
+  for (auto e:originalGeometry->nodes->GetElems(node)) {
+    const auto* cell=originalGeometry->elem[e];
+    unsigned k=0; while (k<3 && cell->GetNode(k)!=node) ++k;
+    if (k==3) throw std::invalid_argument("Invalid slip corner element incidence");
+    Direction a{},b{};
+    for (unsigned d=0;d<2;++d) {
+      a[d]=SU2_TYPE::GetValue(originalGeometry->nodes->GetCoord(cell->GetNode((k+1)%3),d))-
+           SU2_TYPE::GetValue(originalGeometry->nodes->GetCoord(node,d));
+      b[d]=SU2_TYPE::GetValue(originalGeometry->nodes->GetCoord(cell->GetNode((k+2)%3),d))-
+           SU2_TYPE::GetValue(originalGeometry->nodes->GetCoord(node,d));
+    }
+    const double al=std::hypot(a[0],a[1]),bl=std::hypot(b[0],b[1]);
+    for (unsigned d=0;d<2;++d) { a[d]/=al; b[d]/=bl; }
+    angle+=std::atan2(std::abs(a[0]*b[1]-a[1]*b[0]),a[0]*b[0]+a[1]*b[1]);
+    ++triangles;
+  }
+  if (!triangles) throw std::invalid_argument("Missing slip corner element incidence");
+  return angle;
+}
+
+void CPrimitiveEulerSolver::ValidateWeakTrailingEdges(const std::vector<unsigned long>& localNodes) {
+  const double tol=256*std::numeric_limits<double>::epsilon();
+  for (auto node:localNodes) {
+    if (node>=nPoint || !originalGeometry->nodes->GetDomain(node))
+      throw std::invalid_argument("Weak TE authorization requires a local domain node");
+    if (weakTrailingEdge[node]) throw std::invalid_argument("Duplicate weak TE authorization");
+    std::vector<const PrimitiveEuler2D::CAggregatedGeometry::BoundaryFace*> faces;
+    for (const auto& f:metrics->GetBoundaryFaces()) if (f.node==node) faces.push_back(&f);
+    if (faces.size()!=2 || faces[0]->marker!=faces[1]->marker ||
+        originalConfig->GetMarker_All_KindBC(faces[0]->marker)!=EULER_WALL)
+      throw std::invalid_argument("Weak TE requires exactly two branches of one Euler-wall marker, no intersections");
+    auto a=faces[0]->normal,b=faces[1]->normal;
+    const double al=std::hypot(a[0],a[1]),bl=std::hypot(b[0],b[1]);
+    const double resultant=std::hypot(a[0]+b[0],a[1]+b[1]);
+    for (unsigned d=0;d<2;++d) { a[d]/=al; b[d]/=bl; }
+    if (resultant<=tol*(al+bl) || std::abs(a[0]*b[1]-a[1]*b[0])<=tol ||
+        a[0]*b[0]+a[1]*b[1]>=-tol || SlipFluidAngle(node)<=std::acos(-1.)+tol)
+      throw std::invalid_argument("Weak TE requires a nondegenerate finite-angle reentrant two-branch tip");
+    unsigned branches=0; unsigned long previous=nPoint;
+    const auto marker=faces[0]->marker;
+    for (unsigned long e=0;e<originalGeometry->GetnElem_Bound(marker);++e) {
+      const auto* edge=originalGeometry->bound[marker][e];
+      const auto i=edge->GetNode(0),j=edge->GetNode(1);
+      if (i!=node && j!=node) continue;
+      const auto neighbor=i==node?j:i;
+      if (neighbor==previous) throw std::invalid_argument("Weak TE has repeated wall branch");
+      previous=neighbor; ++branches;
+    }
+    if (branches!=2) throw std::invalid_argument("Weak TE has inconsistent wall connectivity");
+    weakTrailingEdge[node]=true;
+  }
+}
+
 std::vector<std::vector<CPrimitiveEulerSolver::Direction>>
 CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
   // A same-marker Euler chain represents a smooth polygonal wall. Its
   // integrated half-face sum is the negative native SU2 vertex normal.
-  // Distinct straight markers retain the explicitly declared phase-9 corners.
-  struct Incident { Direction sum{}, first{}; double measure=0; unsigned count=0; bool bent=false; };
+  // Distinct straight markers retain explicitly declared convex fluid corners.
+  struct Incident { Direction sum{}, first{}; double measure=0; unsigned count=0; bool bent=false, opposed=false; };
   std::map<std::pair<unsigned long,unsigned short>,Incident> incident;
   const double tol=256*std::numeric_limits<double>::epsilon();
   for (const auto& f:metrics->GetBoundaryFaces()) {
@@ -182,6 +240,9 @@ CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
     auto& a=incident[{f.node,f.marker}];
     const double length=std::hypot(f.normal[0],f.normal[1]);
     const Direction unit{{f.normal[0]/length,f.normal[1]/length}};
+    // Conservative admissibility condition for the smooth-wall averaging
+    // model, not an automatic classifier of physical corners or Kutta data.
+    if (a.count && a.first[0]*unit[0]+a.first[1]*unit[1]<=tol) a.opposed=true;
     if (a.count && (std::abs(a.first[0]*unit[1]-a.first[1]*unit[0])>tol ||
                     a.first[0]*unit[0]+a.first[1]*unit[1]<0)) a.bent=true;
     if (!a.count) a.first=unit;
@@ -198,6 +259,10 @@ CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
     const double length=std::hypot(a.sum[0],a.sum[1]);
     if (!std::isfinite(length) || length<=tol*a.measure)
       throw std::invalid_argument("Primitive slip degenerate resultant wall normal");
+    if (weakTrailingEdge[node]) continue; // Validated explicit opt-in: retain only weak face BCs.
+    if (a.opposed && config.GetMarker_All_KindBC(item.first.second)==EULER_WALL)
+      throw std::invalid_argument("Primitive Euler wall fold/trailing edge at node "+std::to_string(node)+
+          ": non-cooriented half-face normals are outside the supported smooth-wall averaging model; corner/TE topology requires explicit treatment");
     if (a.bent && config.GetMarker_All_KindBC(item.first.second)==SYMMETRY_PLANE)
       throw std::invalid_argument("Primitive symmetry marker must remain locally straight");
     if (a.bent && markerCount[node]>1)
@@ -208,6 +273,14 @@ CPrimitiveEulerSolver::BuildSlipConstraints(const CConfig& config) const {
       for (unsigned d=0;d<2;++d) n[d]-=dot*b[d];
     }
     const double magnitude=std::hypot(n[0],n[1]);
+    if (magnitude>tol && !basis[node].empty()) {
+      // A convex fluid corner retains the explicitly declared independent
+      // constraints. At a reentrant fluid corner (e.g. exterior sharp TE),
+      // rank two would silently impose stagnation: reject instead.
+      if (SlipFluidAngle(node)>std::acos(-1.)+tol*(originalGeometry->nodes->GetnElem(node)+1))
+        throw std::invalid_argument("Primitive reentrant Euler/slip corner/trailing edge at node "+std::to_string(node)+
+            ": independent shared-node constraints would impose stagnation; splitting markers is insufficient");
+    }
     if (magnitude>tol && basis[node].size()<2) {
       for (auto& value:n) value/=magnitude;
       basis[node].push_back(n);
@@ -225,7 +298,7 @@ unsigned long CPrimitiveEulerSolver::ProjectFreestreamWallVelocity() {
   for (const auto& f:metrics->GetBoundaryFaces())
     if (originalConfig->GetMarker_All_KindBC(f.marker)==EULER_WALL) wall[f.node]=true;
   unsigned long count=0;
-  for (unsigned long i=0;i<nPoint;++i) if (wall[i]) {
+  for (unsigned long i=0;i<nPoint;++i) if (wall[i] && !weakTrailingEdge[i]) {
     auto w=nodes->GetPrimitiveState(i);
     for (const auto& n:basis[i]) {
       const double un=w[1]*n[0]+w[2]*n[1];

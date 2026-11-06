@@ -16,16 +16,22 @@ class CPrimitiveEulerSolver final : public CSolver {
   std::unique_ptr<PrimitiveEuler2D::CAggregatedGeometry> metrics;
   std::vector<PrimitiveEuler2D::Gradient> limitedGradient;
   std::vector<double> positivityScale;
+  std::vector<bool> weakTrailingEdge;
   const CGeometry* originalGeometry;
   const CConfig* originalConfig;
   std::atomic_flag evaluating = ATOMIC_FLAG_INIT;
   double physicalTime = 0;
   CVariable* GetBaseClassPointerToNodes() override { return nodes.get(); }
   void PrepareReconstruction(CGeometry& geometry, const CConfig& config);
+  double SlipFluidAngle(unsigned long node) const;
+  void ValidateWeakTrailingEdges(const std::vector<unsigned long>& localNodes);
   std::vector<std::vector<PrimitiveEuler2D::Direction>> BuildSlipConstraints(const CConfig& config) const;
 
  public:
-  CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh);
+  // Experimental per-instance opt-in, LOCAL IDs in the original static geometry.
+  // Empty by default; no driver/config activation. Only validated two-branch TEs.
+  CPrimitiveEulerSolver(CGeometry* geometry, CConfig* config, unsigned short mesh,
+                        const std::vector<unsigned long>& weakTrailingEdgeNodes = {});
   CPrimitiveEulerVariable& GetPrimitiveNodes() { return *nodes; }
   const CPrimitiveEulerVariable& GetPrimitiveNodes() const { return *nodes; }
   const PrimitiveEuler2D::CAggregatedGeometry& GetGeometryMetrics() const { return *metrics; }
